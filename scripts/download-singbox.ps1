@@ -20,7 +20,7 @@ $singboxZip = Join-Path $TargetDir "sing-box.zip"
 $singboxUrl = "https://github.com/SagerNet/sing-box/releases/download/v$Version/sing-box-$Version-windows-amd64.zip"
 
 Write-Host "Downloading sing-box from $singboxUrl..."
-Invoke-WebRequest -Uri $singboxUrl -OutFile $singboxZip
+Invoke-WebRequest -Uri $singboxUrl -OutFile $singboxZip -UseBasicParsing
 
 $tempExtract = Join-Path $TargetDir "temp_sb"
 Expand-Archive -Path $singboxZip -DestinationPath $tempExtract -Force
@@ -36,7 +36,7 @@ $wintunUrl = "https://www.wintun.net/builds/wintun-0.14.1.zip"
 
 Write-Host "Downloading wintun driver from $wintunUrl..."
 try {
-    Invoke-WebRequest -Uri $wintunUrl -OutFile $wintunZip
+    Invoke-WebRequest -Uri $wintunUrl -OutFile $wintunZip -UseBasicParsing
     $tempWintun = Join-Path $TargetDir "temp_wintun"
     Expand-Archive -Path $wintunZip -DestinationPath $tempWintun -Force
     $dll = Get-ChildItem -Path $tempWintun -Filter "wintun.dll" -Recurse | Where-Object { $_.DirectoryName -like "*amd64*" } | Select-Object -First 1

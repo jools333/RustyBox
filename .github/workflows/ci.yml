@@ -54,6 +54,18 @@ jobs:
       - name: Run Tests
         run: cargo test --no-default-features --verbose
 
+      - name: Download sing-box and drivers (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          .\scripts\download-singbox.ps1
+
+      - name: Download sing-box (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          chmod +x ./scripts/download-singbox.sh
+          ./scripts/download-singbox.sh
+
       - name: Build Frontend
         working-directory: frontend
         run: |
