@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f97316;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ea580c;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#38bdf8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0284c7;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Background Rounded Rect -->
+  <rect width="512" height="512" rx="100" fill="url(#grad1)" />
+  <!-- Inner Shield / Box -->
+  <path d="M256 96 L376 144 V264 C376 340 256 416 256 416 C256 416 136 340 136 264 V144 Z" fill="#0f172a" />
+  <!-- Connection Node & Radio Waves -->
+  <circle cx="256" cy="270" r="28" fill="url(#shieldGrad)" />
+  <path d="M216 220 A 55 55 0 0 1 296 220" stroke="#38bdf8" stroke-width="14" stroke-linecap="round" fill="none" />
+  <path d="M186 180 A 95 95 0 0 1 326 180" stroke="#38bdf8" stroke-width="14" stroke-linecap="round" stroke-opacity="0.8" fill="none" />
+</svg>

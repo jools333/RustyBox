@@ -1,0 +1,37 @@
+[package]
+name = "rustybox"
+version = "0.1.0"
+description = "Lightweight cross-platform VPN client powered by sing-box"
+authors = ["RustyBox Contributors"]
+edition = "2021"
+
+[lib]
+name = "rustybox_lib"
+crate-type = ["lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", default-features = false }
+
+[features]
+default = ["gui"]
+gui = ["dep:tauri"]
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"], optional = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+url = "2.5"
+percent-encoding = "2.3"
+thiserror = "2.0"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6.0"
+base64 = "0.22"
+regex = "1.11"
+which = "7.0"
+
+[dev-dependencies]
+tempfile = "3.10"

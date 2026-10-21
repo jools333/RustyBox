@@ -1,0 +1,28 @@
+# Rust target directory
+/target/
+**/*.rs.bk
+
+# Node / Frontend
+/frontend/node_modules/
+/frontend/dist/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Downloaded binaries & drivers (obtained via scripts/download-singbox.*)
+/bin/sing-box
+/bin/sing-box.exe
+/bin/wintun.dll
+/bin/wintun.zip
+/bin/*.tar.gz
+/bin/*.zip
+
+# Temporary tools & devkits
+/tools/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
