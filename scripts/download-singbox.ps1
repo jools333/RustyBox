@@ -48,5 +48,5 @@ try {
     Write-Warning "Could not download wintun.dll automatically: $_. Please place wintun.dll manually into $TargetDir if using Windows TUN mode."
 }
 
-Write-Host "Installed files in $TargetDir:" -ForegroundColor Green
+Write-Host "Installed files in ${TargetDir}:" -ForegroundColor Green
 Get-ChildItem -Path $TargetDir | Format-Table Name, Length, LastWriteTime
