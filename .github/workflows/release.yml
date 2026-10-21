@@ -74,8 +74,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
-          releaseName: 'RustyBox ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}'
+          tagName: "${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
+          releaseName: "RustyBox ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
           releaseBody: 'Automated release of RustyBox desktop VPN client for Windows (.exe / .msi) and Linux (.deb / .AppImage).'
           releaseDraft: false
           prerelease: false
