@@ -72,16 +72,16 @@ jobs:
       - name: Run Tests
         run: cargo test --no-default-features --verbose
 
-      - name: Build Desktop Executable
-        run: cargo build --package rustybox --bin rustybox --verbose
+      - name: Build Desktop Executable (Release)
+        run: cargo build --release --package rustybox --bin rustybox --verbose
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: rustybox-build-${{ matrix.os }}
           path: |
-            target/debug/rustybox.exe
-            target/debug/rustybox
+            target/release/rustybox.exe
+            target/release/rustybox
             bin/sing-box.exe
             bin/sing-box
             bin/wintun.dll
