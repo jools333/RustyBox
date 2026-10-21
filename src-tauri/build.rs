@@ -14,6 +14,22 @@ fn main() {
             let _ = std::fs::write(&placeholder, "RustyBox binaries directory\n");
         }
 
+        // Ensure frontend/dist exists so tauri::generate_context!() does not panic
+        // during clippy or cargo check if frontend hasn't been built yet.
+        let frontend_dist = manifest_dir
+            .parent()
+            .unwrap_or(&manifest_dir)
+            .join("frontend")
+            .join("dist");
+        let _ = std::fs::create_dir_all(&frontend_dist);
+        let index_html = frontend_dist.join("index.html");
+        if !index_html.exists() {
+            let _ = std::fs::write(
+                &index_html,
+                "<!DOCTYPE html><html><body>RustyBox</body></html>\n",
+            );
+        }
+
         let tauri_conf = manifest_dir.join("tauri.conf.json");
         let ico_path = manifest_dir.join("icons").join("icon.ico");
 

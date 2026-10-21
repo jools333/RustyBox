@@ -22,6 +22,11 @@ impl TunManager {
         let mut has_driver = false;
         let is_elevated = check_elevation();
 
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = singbox_binary_path;
+        }
+
         #[cfg(target_os = "windows")]
         {
             // On Windows, wintun.dll is required next to sing-box or in System32
@@ -260,7 +265,7 @@ pub fn check_elevation() -> bool {
     #[cfg(target_os = "linux")]
     {
         // On Linux, EUID == 0 means root
-        unsafe { libc_or_zero() == 0 }
+        libc_or_zero() == 0
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]

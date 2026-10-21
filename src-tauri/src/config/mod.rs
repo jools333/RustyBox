@@ -164,7 +164,7 @@ mod tests {
 
         let mgr2 = ConfigManager::new(path);
         let loaded = mgr2.get_config();
-        assert_eq!(loaded.close_to_tray, false);
+        assert!(!loaded.close_to_tray);
         assert_eq!(loaded.remote_dns, "8.8.8.8");
     }
 
