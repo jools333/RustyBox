@@ -33,6 +33,7 @@ RustyBox is a modern, lightweight, cross-platform desktop VPN client built with 
   - [Verifying TUN Interface](#verifying-tun-interface)
   - [Verifying Domain Routing Rules](#verifying-domain-routing-rules)
   - [Verifying DNS Leak Protection & Hijack](#verifying-dns-leak-protection--hijack)
+- [Agent & Developer Guide (`AGENTS.md`)](#agent--developer-guide-agentsmd)
 - [Licensing & Compliance](#licensing--compliance)
 
 ---
@@ -49,7 +50,8 @@ RustyBox is a modern, lightweight, cross-platform desktop VPN client built with 
   - Exact match (`exact`), suffix/wildcard match (`suffix`), and keyword match (`keyword`).
   - Configurable default action (`DIRECT` or `VPN`).
   - Automatic `action: "sniff"` rule to extract real domain names from TLS SNI and HTTP Host headers without client certs.
-  - DNS interception via `protocol: "dns", action: "hijack-dns"`.
+  - Full DNS interception via `{ "port": 53, "action": "hijack-dns" }` and `{ "protocol": "dns", "action": "hijack-dns" }`.
+  - Automatic proxy server domain bypass rule (`outbound: "direct"`) to completely prevent routing loops.
 - **Robust Subprocess Supervision**:
   - Fully asynchronous lifecycle (`Disconnected` &rarr; `Starting` &rarr; `Connected` &rarr; `Stopping` &rarr; `Error`).
   - Rapid click debounce protection (prevents double-spawn races).
@@ -59,7 +61,8 @@ RustyBox is a modern, lightweight, cross-platform desktop VPN client built with 
   - Full secret masking: UUIDs, passwords, REALITY private keys, and base64 credentials are completely scrubbed from memory buffers, UI logs, and exported diagnostic bundles.
   - Local configuration stored in OS-standard app data directories (`%APPDATA%/rustybox` on Windows, `~/.config/rustybox` on Linux).
   - Corrupted config auto-recovery: backs up invalid config files and initializes clean defaults without data destruction.
-- **Desktop Integration**:
+- **Clean Desktop Integration**:
+  - Native Windows Subsystem: strictly a GUI process (`IMAGE_SUBSYSTEM_WINDOWS_GUI`), completely eliminating console windows on launch.
   - System tray icon with real-time connection status (`Connected`, `Connecting`, `Disconnected`, `Error`).
   - "Close to tray" behavior to keep VPN active during multitasking.
 
@@ -275,27 +278,27 @@ Navigate to the **Logs** tab:
 RustyBox includes a comprehensive unit and integration test suite covering all 12 core test scenarios:
 
 ```bash
-# Run all unit and integration tests
-cargo test
+# Run headless unit and integration tests (recommended for rapid verification)
+cargo test --no-default-features
 ```
 
 Test scenarios covered:
-1. `test_01_vless_reality_profile_parsing`
-2. `test_02_shadowsocks_profile_parsing`
-3. `test_03_singbox_config_generation_tun_vless`
-4. `test_04_singbox_config_generation_tun_ss`
-5. `test_05_singbox_config_validation_with_binary`
-6. `test_06_lifecycle_state_transitions`
-7. `test_07_tun_interface_prerequisites_check`
-8. `test_08_domain_routing_rules_direct_vs_vpn`
-9. `test_09_singbox_process_spawn_and_graceful_stop`
-10. `test_10_secret_masking_in_logs_and_diagnostics`
-11. `test_11_config_file_persistence_and_corruption_recovery`
-12. `test_12_simulated_process_crash_and_restart`
+1. `test_scenario_01_parse_valid_vless_uri` (VLESS Reality URI parser)
+2. `test_scenario_02_parse_valid_shadowsocks_uri` (Shadowsocks SIP002 & legacy)
+3. `test_scenario_03_reject_invalid_uris` (rejection of malformed URIs, ports, UUIDs)
+4. `test_scenario_04_save_and_load_profiles` (JSON serialization & persistence)
+5. `test_scenario_05_add_edit_delete_rules` (routing rules CRUD)
+6. `test_scenario_06_rule_priority_and_order` (rule reordering and priority evaluation)
+7. `test_scenario_07_singbox_config_generation` (sing-box 1.14 typed DNS & route validation)
+8. `test_scenario_08_secret_masking` (credential redaction in logs and bundles)
+9. `test_scenario_09_repeated_connect_click` (debounce protection against double-spawn)
+10. `test_scenario_10_state_transitions` (Disconnected -> Starting -> Connected -> Stopping)
+11. `test_scenario_11_failed_core_launch` (graceful failure to Error state)
+12. `test_scenario_12_stop_core_when_not_running` (safe idempotent Stop calls)
 
 ### Verifying TUN Interface
 
-1. Start connection in RustyBox.
+1. Start connection in RustyBox (running as Administrator on Windows or with root capabilities on Linux).
 2. In PowerShell (Administrator):
    ```powershell
    Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*wintun*" }
@@ -318,11 +321,21 @@ Test scenarios covered:
 
 ### Verifying DNS Leak Protection & Hijack
 
-RustyBox intercepts all DNS requests via `protocol: "dns", action: "hijack-dns"`:
+RustyBox intercepts all DNS requests via `{ "port": 53, "action": "hijack-dns" }` and `{ "protocol": "dns", "action": "hijack-dns" }`:
 ```powershell
 nslookup whoami.akamai.net 172.19.0.2
 ```
 Verify that DNS queries are handled through the encrypted proxy tunnel and no unencrypted UDP DNS leaks to your local ISP.
+
+---
+
+## Agent & Developer Guide (`AGENTS.md`)
+
+For artificial intelligence coding assistants and developers contributing to this repository, a comprehensive operational guide is available in [AGENTS.md](AGENTS.md). It outlines:
+- Environment and toolchain requirements (Windows MinGW/GNU toolchain paths, incremental compilation flags).
+- sing-box 1.14 syntax and configuration requirements.
+- Step-by-step instructions for running tests, formatting, and compiling.
+- Troubleshooting common Windows desktop, Job Object, and TUN driver issues.
 
 ---
 
