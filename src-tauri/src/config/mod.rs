@@ -56,7 +56,7 @@ impl Default for AppConfig {
             ],
             profiles: vec![],
             remote_dns: "1.1.1.1".to_string(),
-            direct_dns: "local".to_string(),
+            direct_dns: "77.88.8.8".to_string(),
             close_to_tray: true,
             singbox_path: None,
             tun_interface_name: "rustybox-tun".to_string(),

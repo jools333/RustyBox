@@ -1,0 +1,26 @@
+{
+  "dns": {
+    "servers": [
+      {
+        "tag": "dns-remote",
+        "type": "udp",
+        "server": "1.1.1.1",
+        "detour": "direct"
+      },
+      {
+        "tag": "dns-direct",
+        "type": "local",
+        "detour": "direct"
+      }
+    ]
+  },
+  "route": {
+    "default_domain_resolver": "dns-direct"
+  },
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ]
+}

@@ -23,10 +23,25 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         ])
         .build()?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or("No default window icon")?;
+    let icon = match app.default_window_icon() {
+        Some(icon) => icon.clone(),
+        None => {
+            #[cfg(windows)]
+            {
+                if let Ok(icon) = tauri::image::Image::from_app_icon_resource(32) {
+                    icon
+                } else {
+                    let bytes = include_bytes!("../../icons/32x32.png");
+                    tauri::image::Image::from_bytes(bytes)?
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                let bytes = include_bytes!("../../icons/32x32.png");
+                tauri::image::Image::from_bytes(bytes)?
+            }
+        }
+    };
 
     let _tray = TrayIconBuilder::with_id("main-tray")
         .icon(icon)

@@ -115,12 +115,49 @@ impl TunManager {
 pub fn check_elevation() -> bool {
     #[cfg(target_os = "windows")]
     {
-        // Safe elevation check on Windows
-        use std::process::Command;
-        if let Ok(output) = Command::new("net").arg("session").output() {
-            output.status.success()
-        } else {
-            false
+        extern "system" {
+            fn GetCurrentProcess() -> isize;
+            fn OpenProcessToken(
+                process: isize,
+                desired_access: u32,
+                token_handle: *mut isize,
+            ) -> i32;
+            fn GetTokenInformation(
+                token_handle: isize,
+                token_information_class: u32,
+                token_information: *mut std::ffi::c_void,
+                token_information_length: u32,
+                return_length: *mut u32,
+            ) -> i32;
+            fn CloseHandle(handle: isize) -> i32;
+        }
+
+        #[repr(C)]
+        struct TokenElevation {
+            token_is_elevated: u32,
+        }
+
+        unsafe {
+            let mut token: isize = 0;
+            // TOKEN_QUERY = 0x0008
+            if OpenProcessToken(GetCurrentProcess(), 0x0008, &mut token) != 0 {
+                let mut elevation = TokenElevation {
+                    token_is_elevated: 0,
+                };
+                let mut ret_len = 0;
+                // TokenElevation = 20
+                let res = GetTokenInformation(
+                    token,
+                    20,
+                    &mut elevation as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of::<TokenElevation>() as u32,
+                    &mut ret_len,
+                );
+                CloseHandle(token);
+                res != 0 && elevation.token_is_elevated != 0
+            } else {
+                false
+            }
         }
     }
 

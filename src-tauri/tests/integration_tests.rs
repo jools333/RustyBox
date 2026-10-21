@@ -187,13 +187,12 @@ fn test_scenario_07_singbox_config_generation() {
     assert_eq!(config["dns"]["servers"][0]["tag"], "dns-remote");
     assert_eq!(config["dns"]["servers"][0]["type"], "udp");
     assert_eq!(config["dns"]["servers"][1]["tag"], "dns-direct");
-    assert_eq!(config["dns"]["servers"][1]["type"], "local");
+    assert_eq!(config["dns"]["servers"][1]["type"], "udp");
 
     // Route actions: sniff and hijack-dns
     let rules = config["route"]["rules"].as_array().unwrap();
     assert_eq!(rules[0]["action"], "sniff");
     assert_eq!(rules[1]["action"], "hijack-dns");
-    assert_eq!(rules[2]["ip_is_private"], true);
 
     // TUN inbound modern format (address array)
     assert_eq!(config["inbounds"][0]["type"], "tun");

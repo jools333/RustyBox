@@ -26,12 +26,20 @@ pub fn run() {
     tauri::Builder::default()
         .manage(app_state.clone())
         .setup(move |app| {
+            let _ = std::fs::write("z:\\jvpn\\setup.log", "setup called\n");
             if let Err(e) = tray::setup_tray(app.handle()) {
+                let _ = std::fs::write("z:\\jvpn\\tray_error.log", format!("Tray error: {}\n", e));
                 tracing::warn!("Failed to setup system tray: {}", e);
+            } else {
+                let _ = std::fs::write("z:\\jvpn\\tray_error.log", "Tray setup success!\n");
             }
 
             // Handle window close event (minimize to tray if configured)
             if let Some(main_window) = app.get_webview_window("main") {
+                let _ = std::fs::write("z:\\jvpn\\window.log", "main window found\n");
+                let _ = main_window.show();
+                let _ = main_window.unminimize();
+                let _ = main_window.set_focus();
                 let state_clone = app_state.clone();
                 let win_clone = main_window.clone();
                 main_window.on_window_event(move |event| {
@@ -43,6 +51,8 @@ pub fn run() {
                         }
                     }
                 });
+            } else {
+                let _ = std::fs::write("z:\\jvpn\\window.log", "NO main window found!\n");
             }
 
             Ok(())
@@ -73,6 +83,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("z:\\jvpn\\events.log")
+            {
+                use std::io::Write;
+                let _ = writeln!(f, "Event: {:?}", event);
+            }
+
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 // Ensure core is killed when app exits
                 if let Some(state) = app_handle.try_state::<AppState>() {

@@ -48,6 +48,7 @@ pub struct CoreProcess {
 pub struct CoreManager {
     process: Arc<Mutex<Option<CoreProcess>>>,
     custom_binary_path: Arc<Mutex<Option<PathBuf>>>,
+    cached_version: Arc<Mutex<Option<String>>>,
     log_manager: LogManager,
     tun_manager: TunManager,
 }
@@ -57,6 +58,7 @@ impl CoreManager {
         Self {
             process: Arc::new(Mutex::new(None)),
             custom_binary_path: Arc::new(Mutex::new(None)),
+            cached_version: Arc::new(Mutex::new(None)),
             log_manager,
             tun_manager: TunManager::new(),
         }
@@ -73,6 +75,8 @@ impl CoreManager {
             if let Some(ref path) = *lock {
                 if path.exists() {
                     return Some(path.clone());
+                } else {
+                    return None;
                 }
             }
         }
@@ -113,14 +117,29 @@ impl CoreManager {
     }
 
     pub fn get_version(&self) -> Result<String, CoreError> {
+        if let Ok(lock) = self.cached_version.lock() {
+            if let Some(ref v) = *lock {
+                return Ok(v.clone());
+            }
+        }
+
         let binary = self.find_binary().ok_or(CoreError::BinaryNotFound)?;
-        let output = std::process::Command::new(&binary)
-            .arg("version")
-            .output()?;
+        let mut cmd = std::process::Command::new(&binary);
+        cmd.arg("version");
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let output = cmd.output()?;
 
         if output.status.success() {
             let ver = String::from_utf8_lossy(&output.stdout);
-            Ok(ver.lines().next().unwrap_or("sing-box").trim().to_string())
+            let result = ver.lines().next().unwrap_or("sing-box").trim().to_string();
+            if let Ok(mut lock) = self.cached_version.lock() {
+                *lock = Some(result.clone());
+            }
+            Ok(result)
         } else {
             let err = String::from_utf8_lossy(&output.stderr);
             Err(CoreError::ValidationFailed(err.to_string()))
@@ -228,8 +247,19 @@ impl CoreManager {
         let mut route_rules = Vec::new();
 
         route_rules.push(json!({ "action": "sniff" }));
+        route_rules.push(json!({ "port": 53, "action": "hijack-dns" }));
         route_rules.push(json!({ "protocol": "dns", "action": "hijack-dns" }));
         route_rules.push(json!({ "ip_is_private": true, "outbound": "direct" }));
+
+        // Bypass proxy server itself to prevent routing loops
+        route_rules.push(json!({
+            "domain": [profile.server.clone()],
+            "outbound": "direct"
+        }));
+        dns_rules.push(json!({
+            "domain": [profile.server.clone()],
+            "server": "dns-direct"
+        }));
 
         match routing_mode {
             RoutingMode::GlobalVpn => {}
@@ -276,6 +306,18 @@ impl CoreManager {
 
         let tun_inbound = self.tun_manager.generate_tun_inbound(tun_interface_name);
 
+        let remote_dns_val = if remote_dns.is_empty() {
+            "1.1.1.1"
+        } else {
+            remote_dns
+        };
+
+        let direct_dns_val = if _direct_dns.is_empty() || _direct_dns == "local" {
+            "77.88.8.8"
+        } else {
+            _direct_dns
+        };
+
         json!({
             "log": {
                 "level": log_level,
@@ -286,13 +328,13 @@ impl CoreManager {
                     {
                         "tag": "dns-remote",
                         "type": "udp",
-                        "server": remote_dns,
+                        "server": remote_dns_val,
                         "detour": "proxy"
                     },
                     {
                         "tag": "dns-direct",
-                        "type": "local",
-                        "detour": "direct"
+                        "type": "udp",
+                        "server": direct_dns_val
                     }
                 ],
                 "rules": dns_rules,
@@ -317,11 +359,14 @@ impl CoreManager {
         let json_str = serde_json::to_string_pretty(config)?;
         std::fs::write(&temp_config, json_str)?;
 
-        let output = std::process::Command::new(&binary)
-            .arg("check")
-            .arg("-c")
-            .arg(&temp_config)
-            .output();
+        let mut cmd = std::process::Command::new(&binary);
+        cmd.arg("check").arg("-c").arg(&temp_config);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let output = cmd.output();
 
         let _ = std::fs::remove_file(&temp_config);
 

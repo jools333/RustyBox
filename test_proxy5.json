@@ -1,0 +1,54 @@
+{
+  "log": { "level": "debug" },
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "jools.com.ru",
+      "server_port": 50606,
+      "uuid": "77a1126b-0487-4856-82e9-1ba5e702759b",
+      "flow": "xtls-rprx-vision",
+      "packet_encoding": "xudp",
+      "tls": {
+        "enabled": true,
+        "server_name": "www.amazon.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "VWRgZevuC_xptMd5Cv2Eh1xy1z1SvUEDqXNiXTVxlzk",
+          "short_id": "05615f16d11782"
+        }
+      }
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "default_domain_resolver": "dns-direct",
+    "rules": [
+      { "port": 53, "action": "hijack-dns" }
+    ],
+    "final": "proxy"
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "dns-remote",
+        "type": "udp",
+        "server": "1.1.1.1",
+        "detour": "proxy"
+      },
+      {
+        "tag": "dns-direct",
+        "type": "udp",
+        "server": "77.88.8.8"
+      }
+    ],
+    "final": "dns-remote"
+  }
+}

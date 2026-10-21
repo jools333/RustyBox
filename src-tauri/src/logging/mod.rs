@@ -33,6 +33,14 @@ impl LogManager {
 
     pub fn add_log(&self, level: &str, raw_message: &str) {
         let masked = mask_secrets(raw_message);
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("z:\\jvpn\\singbox.log")
+            .and_then(|mut f| {
+                use std::io::Write;
+                writeln!(f, "[{}] [{}] {}", Utc::now().to_rfc3339(), level, masked)
+            });
         if let Ok(mut entries) = self.entries.write() {
             if entries.len() >= self.max_entries {
                 entries.pop_front();
