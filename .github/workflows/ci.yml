@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -26,12 +26,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
           cache-dependency-path: frontend/package.json
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libayatana-appindicator3-dev librsvg2-dev
@@ -52,7 +52,7 @@ jobs:
           .\scripts\download-singbox.ps1
 
       - name: Download sing-box (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           chmod +x ./scripts/download-singbox.sh
           ./scripts/download-singbox.sh
@@ -74,3 +74,15 @@ jobs:
 
       - name: Build Desktop Executable
         run: cargo build --package rustybox --bin rustybox --verbose
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustybox-build-${{ matrix.os }}
+          path: |
+            target/debug/rustybox.exe
+            target/debug/rustybox
+            bin/sing-box.exe
+            bin/sing-box
+            bin/wintun.dll
+          if-no-files-found: warn
