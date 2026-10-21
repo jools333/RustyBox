@@ -16,7 +16,23 @@ pub mod tray;
 #[cfg(feature = "gui")]
 use app::AppState;
 #[cfg(feature = "gui")]
+use std::path::PathBuf;
+#[cfg(feature = "gui")]
 use tauri::{Manager, WindowEvent};
+
+#[cfg(feature = "gui")]
+fn debug_log_path(file: &str) -> PathBuf {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rustybox");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join(file)
+}
+
+#[cfg(feature = "gui")]
+fn debug_log(file: &str, contents: &str) {
+    let _ = std::fs::write(debug_log_path(file), contents);
+}
 
 #[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,17 +42,24 @@ pub fn run() {
     tauri::Builder::default()
         .manage(app_state.clone())
         .setup(move |app| {
-            let _ = std::fs::write("z:\\jvpn\\setup.log", "setup called\n");
+            debug_log("setup.log", "setup called\n");
+
+            // Clean up any stale Wintun/TUN adapter left behind by a previous crash or sudden reboot
+            #[cfg(target_os = "windows")]
+            {
+                app_state.tun.cleanup_stale_adapter("rustybox-tun");
+            }
+
             if let Err(e) = tray::setup_tray(app.handle()) {
-                let _ = std::fs::write("z:\\jvpn\\tray_error.log", format!("Tray error: {}\n", e));
+                debug_log("tray_error.log", &format!("Tray error: {}\n", e));
                 tracing::warn!("Failed to setup system tray: {}", e);
             } else {
-                let _ = std::fs::write("z:\\jvpn\\tray_error.log", "Tray setup success!\n");
+                debug_log("tray_error.log", "Tray setup success!\n");
             }
 
             // Handle window close event (minimize to tray if configured)
             if let Some(main_window) = app.get_webview_window("main") {
-                let _ = std::fs::write("z:\\jvpn\\window.log", "main window found\n");
+                debug_log("window.log", "main window found\n");
                 let _ = main_window.show();
                 let _ = main_window.unminimize();
                 let _ = main_window.set_focus();
@@ -52,7 +75,7 @@ pub fn run() {
                     }
                 });
             } else {
-                let _ = std::fs::write("z:\\jvpn\\window.log", "NO main window found!\n");
+                debug_log("window.log", "NO main window found!\n");
             }
 
             Ok(())
@@ -86,7 +109,7 @@ pub fn run() {
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("z:\\jvpn\\events.log")
+                .open(debug_log_path("events.log"))
             {
                 use std::io::Write;
                 let _ = writeln!(f, "Event: {:?}", event);

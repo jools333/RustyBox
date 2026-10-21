@@ -168,11 +168,14 @@ When modifying [src-tauri/src/core/mod.rs](file:///z:/jvpn/src-tauri/src/core/mo
 1. **Secret Masking**:
    - All UUIDs (`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}...`), passwords, REALITY public/private keys, and base64 credentials must pass through `mask_secrets` in [src-tauri/src/logging/mod.rs](file:///z:/jvpn/src-tauri/src/logging/mod.rs) before:
      - Storing in the in-memory log buffer (`LogManager`).
-     - Writing to `z:\jvpn\singbox.log`.
+     - Writing to the on-disk log file (repo-local `z:\jvpn\singbox.log` during development; `%APPDATA%\rustybox\singbox.log` when the repo drive is unavailable, e.g. in an elevated process).
      - Sending to the frontend via Tauri IPC (`get_logs`, `get_diagnostic_report`).
 2. **Configuration Protection**:
    - User configs are saved to the OS app data directory (`%APPDATA%/rustybox/config.json` on Windows).
    - If a config file is corrupted, the application MUST back it up as `config.json.corrupted.<timestamp>` and initialize safe defaults rather than crashing.
+3. **Core Supervision**:
+   - `start_core` MUST NOT report success before sing-box has logged `sing-box started` and installed the TUN interface/routes.
+   - If the core exits unexpectedly, the connection state MUST transition to `Error` (`ConnectionManager::get_status` checks `CoreManager::is_running`) instead of displaying `Connected` while traffic silently bypasses the VPN.
 
 ---
 
@@ -231,4 +234,4 @@ On Windows, virtual TUN adapters and routing table changes require Administrator
    cd z:\jvpn
    .\target\debug\rustybox.exe
    ```
-3. Logs will stream to `z:\jvpn\rustybox.log` and `z:\jvpn\singbox.log`.
+3. Logs will stream to `%APPDATA%\rustybox\singbox.log` (when running elevated) or to `z:\jvpn\singbox.log` (when the mapped drive is available). Application diagnostics are written to `%APPDATA%\rustybox\`.

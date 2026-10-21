@@ -5,9 +5,12 @@ use crate::routing::{RoutingRule, RuleAction};
 use crate::tun::TunManager;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
@@ -18,6 +21,8 @@ pub enum CoreError {
     BinaryNotFound,
     #[error("sing-box check failed: {0}")]
     ValidationFailed(String),
+    #[error("sing-box failed to start: {0}")]
+    StartFailed(String),
     #[error("Core is already running")]
     AlreadyRunning,
     #[error("Core is not running")]
@@ -49,8 +54,84 @@ pub struct CoreManager {
     process: Arc<Mutex<Option<CoreProcess>>>,
     custom_binary_path: Arc<Mutex<Option<PathBuf>>>,
     cached_version: Arc<Mutex<Option<String>>>,
+    recent_output: Arc<Mutex<VecDeque<String>>>,
+    last_exit_error: Arc<Mutex<Option<String>>>,
     log_manager: LogManager,
     tun_manager: TunManager,
+}
+
+/// Strips ANSI terminal escape codes from text (e.g. \x1b[36m, \x1b[0m).
+pub fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&next_ch) = chars.peek() {
+                    chars.next();
+                    if next_ch.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+pub fn format_diagnostic_lines(lines: &[String]) -> String {
+    let clean: Vec<String> = lines
+        .iter()
+        .map(|line| strip_ansi(line))
+        .map(|line| crate::logging::mask_secrets(&line))
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    if clean.is_empty() {
+        return String::new();
+    }
+
+    // Look for FATAL or ERROR lines first, as they contain the actual root cause
+    let error_lines: Vec<&String> = clean
+        .iter()
+        .filter(|line| line.contains("FATAL") || line.contains("ERROR"))
+        .collect();
+
+    if !error_lines.is_empty() {
+        let start = error_lines.len().saturating_sub(2);
+        error_lines[start..]
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        let start = clean.len().saturating_sub(2);
+        clean[start..]
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Maps a sing-box log line to an application log level.
+///
+/// sing-box writes all of its logs (including INFO) to stderr, so the stream
+/// alone is not a reliable level indicator.
+fn detect_level(line: &str) -> &'static str {
+    if line.contains("FATAL") || line.contains("ERROR") {
+        "error"
+    } else if line.contains("WARN") {
+        "warn"
+    } else if line.contains("DEBUG") {
+        "debug"
+    } else {
+        "info"
+    }
 }
 
 impl CoreManager {
@@ -59,9 +140,67 @@ impl CoreManager {
             process: Arc::new(Mutex::new(None)),
             custom_binary_path: Arc::new(Mutex::new(None)),
             cached_version: Arc::new(Mutex::new(None)),
+            recent_output: Arc::new(Mutex::new(VecDeque::new())),
+            last_exit_error: Arc::new(Mutex::new(None)),
             log_manager,
             tun_manager: TunManager::new(),
         }
+    }
+
+    fn recent_output_text(&self) -> String {
+        self.recent_output
+            .lock()
+            .map(|recent| {
+                let lines: Vec<String> = recent.iter().cloned().collect();
+                format_diagnostic_lines(&lines)
+            })
+            .unwrap_or_default()
+    }
+
+    /// Returns true when the sing-box child process is still alive.
+    ///
+    /// Also detects a process that exited on its own (TUN setup failure, bad
+    /// profile, crash, ...) and records a diagnostic message so the UI does not
+    /// keep reporting "Connected" while traffic goes out directly through the
+    /// ISP.
+    pub fn is_running(&self) -> bool {
+        let mut lock = match self.process.lock() {
+            Ok(lock) => lock,
+            Err(_) => return false,
+        };
+
+        let proc = match lock.as_mut() {
+            Some(proc) => proc,
+            None => return false,
+        };
+
+        match proc.child.try_wait() {
+            Ok(None) => true,
+            Ok(Some(status)) => {
+                let output = self.recent_output_text();
+                let message = if output.is_empty() {
+                    format!("sing-box core exited unexpectedly ({})", status)
+                } else {
+                    format!("sing-box core exited unexpectedly ({}): {}", status, output)
+                };
+                self.log_manager.add_log("error", &message);
+                if let Ok(mut last) = self.last_exit_error.lock() {
+                    *last = Some(message);
+                }
+                let _ = std::fs::remove_file(&proc.config_path);
+                *lock = None;
+                false
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Takes the most recent unexpected-exit diagnostic, if any.
+    pub fn take_exit_error(&self) -> Option<String> {
+        self.last_exit_error
+            .lock()
+            .ok()
+            .and_then(|mut last| last.take())
     }
 
     pub fn set_custom_binary_path(&self, path: Option<PathBuf>) {
@@ -96,6 +235,14 @@ impl CoreManager {
                 let candidate_bin = parent.join("bin").join(exe_name);
                 if candidate_bin.exists() {
                     return Some(candidate_bin);
+                }
+                let candidate_res = parent.join("resources").join(exe_name);
+                if candidate_res.exists() {
+                    return Some(candidate_res);
+                }
+                let candidate_res_bin = parent.join("resources").join("bin").join(exe_name);
+                if candidate_res_bin.exists() {
+                    return Some(candidate_res_bin);
                 }
             }
         }
@@ -147,9 +294,15 @@ impl CoreManager {
     }
 
     pub fn get_status(&self) -> CoreStatus {
-        let lock = self.process.lock().ok();
-        let is_running = lock.as_ref().map(|l| l.is_some()).unwrap_or(false);
-        let pid = lock.as_ref().and_then(|l| l.as_ref().map(|p| p.pid));
+        let is_running = self.is_running();
+        let pid = if is_running {
+            self.process
+                .lock()
+                .ok()
+                .and_then(|lock| lock.as_ref().map(|p| p.pid))
+        } else {
+            None
+        };
         let binary_path = self.find_binary().map(|p| p.display().to_string());
         let version = self.get_version().ok();
 
@@ -402,10 +555,23 @@ impl CoreManager {
         let json_str = serde_json::to_string_pretty(&config)?;
         std::fs::write(&config_path, json_str)?;
 
+        if let Ok(mut recent) = self.recent_output.lock() {
+            recent.clear();
+        }
+        if let Ok(mut last) = self.last_exit_error.lock() {
+            *last = None;
+        }
+
         self.log_manager.add_log(
             "info",
             &format!("Starting sing-box core with binary {}", binary.display()),
         );
+
+        // Pre-flight cleanup: remove any orphaned or conflicting TUN adapter left over from crashes
+        #[cfg(target_os = "windows")]
+        {
+            self.tun_manager.cleanup_stale_adapter("rustybox-tun");
+        }
 
         let mut cmd = Command::new(&binary);
         cmd.arg("run")
@@ -417,28 +583,62 @@ impl CoreManager {
 
         #[cfg(target_os = "windows")]
         {
-            cmd.creation_flags(0x08000000);
+            // CREATE_NO_WINDOW (0x08000000) prevents console window popup
+            // CREATE_NEW_PROCESS_GROUP (0x00000200) allows sending CTRL_BREAK for graceful shutdown
+            cmd.creation_flags(0x08000000 | 0x00000200);
         }
 
-        let mut child = cmd.spawn()?;
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                let _ = std::fs::remove_file(&config_path);
+                return Err(CoreError::Io(e));
+            }
+        };
         let pid = child.id().unwrap_or(0);
+        let started_flag = Arc::new(AtomicBool::new(false));
 
         if let Some(stdout) = child.stdout.take() {
             let log_mgr = self.log_manager.clone();
+            let recent = self.recent_output.clone();
+            let started = started_flag.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
-                    log_mgr.add_log("info", &line);
+                    if line.contains("sing-box started") {
+                        started.store(true, Ordering::SeqCst);
+                    }
+                    if let Ok(mut recent) = recent.lock() {
+                        if recent.len() >= 40 {
+                            recent.pop_front();
+                        }
+                        recent.push_back(line.clone());
+                    }
+                    let level = detect_level(&line);
+                    log_mgr.add_log(level, &line);
                 }
             });
         }
 
         if let Some(stderr) = child.stderr.take() {
             let log_mgr = self.log_manager.clone();
+            let recent = self.recent_output.clone();
+            let started = started_flag.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
-                    log_mgr.add_log("error", &line);
+                    // sing-box reports readiness on stderr as well.
+                    if line.contains("sing-box started") {
+                        started.store(true, Ordering::SeqCst);
+                    }
+                    if let Ok(mut recent) = recent.lock() {
+                        if recent.len() >= 40 {
+                            recent.pop_front();
+                        }
+                        recent.push_back(line.clone());
+                    }
+                    let level = detect_level(&line);
+                    log_mgr.add_log(level, &line);
                 }
             });
         }
@@ -451,8 +651,84 @@ impl CoreManager {
             *lock = Some(CoreProcess {
                 child,
                 pid,
-                config_path,
+                config_path: config_path.clone(),
             });
+        }
+
+        // sing-box creates the TUN interface and installs routes before it logs
+        // "sing-box started". Wait for that marker (or an early exit) so the UI
+        // never reports "Connected" while the core is dead and traffic silently
+        // bypasses the tunnel.
+        // Wintun driver setup timeout is 15 seconds; give it up to 18s before declaring timeout.
+        let deadline = Instant::now() + Duration::from_secs(18);
+        let mut startup_timed_out = false;
+        loop {
+            let exit_status = {
+                let mut lock = self
+                    .process
+                    .lock()
+                    .map_err(|e| CoreError::Lock(e.to_string()))?;
+                match lock.as_mut() {
+                    Some(proc) => proc
+                        .child
+                        .try_wait()
+                        .map_err(CoreError::Io)?
+                        .map(|status| status.to_string()),
+                    // Stopped externally (e.g. user pressed disconnect).
+                    None => Some("stopped".to_string()),
+                }
+            };
+
+            if let Some(status) = exit_status {
+                // Give the stdout/stderr readers a moment to drain the pipe so
+                // the diagnostic contains sing-box's own error message.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                if let Ok(mut lock) = self.process.lock() {
+                    *lock = None;
+                }
+                let _ = std::fs::remove_file(&config_path);
+                let details = self.recent_output_text();
+                let message = if details.is_empty() {
+                    format!("sing-box exited during startup ({})", status)
+                } else {
+                    format!("sing-box exited during startup ({}): {}", status, details)
+                };
+                self.log_manager.add_log("error", &message);
+                return Err(CoreError::StartFailed(message));
+            }
+
+            if started_flag.load(Ordering::SeqCst) {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                startup_timed_out = true;
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        if startup_timed_out || !self.is_running() {
+            let proc_opt = {
+                let mut lock = self
+                    .process
+                    .lock()
+                    .map_err(|e| CoreError::Lock(e.to_string()))?;
+                lock.take()
+            };
+            if let Some(mut proc) = proc_opt {
+                let _ = proc.child.kill().await;
+            }
+            let _ = std::fs::remove_file(&config_path);
+            let details = self.recent_output_text();
+            let message = if details.is_empty() {
+                "sing-box startup timed out waiting for TUN readiness".to_string()
+            } else {
+                format!("sing-box startup timed out: {}", details)
+            };
+            self.log_manager.add_log("error", &message);
+            return Err(CoreError::StartFailed(message));
         }
 
         self.log_manager.add_log(
@@ -475,8 +751,39 @@ impl CoreManager {
         if let Some(mut proc) = proc_opt.take() {
             self.log_manager
                 .add_log("info", "Stopping sing-box core process...");
-            let _ = proc.child.kill().await;
+
+            #[cfg(target_os = "windows")]
+            {
+                extern "system" {
+                    fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32) -> i32;
+                }
+                const CTRL_BREAK_EVENT: u32 = 1;
+                // Signal sing-box for graceful teardown (routes restore and Wintun adapter cleanup)
+                unsafe {
+                    GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
+                }
+                // Wait up to 2.5s for graceful exit
+                let graceful_exit =
+                    tokio::time::timeout(Duration::from_millis(2500), proc.child.wait()).await;
+
+                if graceful_exit.is_err() {
+                    let _ = proc.child.kill().await;
+                }
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = proc.child.kill().await;
+            }
+
             let _ = std::fs::remove_file(&proc.config_path);
+
+            // Clean up any residual adapter
+            #[cfg(target_os = "windows")]
+            {
+                self.tun_manager.cleanup_stale_adapter("rustybox-tun");
+            }
+
             self.log_manager
                 .add_log("info", "sing-box core process stopped");
             Ok(())
@@ -545,6 +852,14 @@ mod tests {
     }
 
     #[test]
+    fn test_is_not_running_without_process() {
+        let core_mgr = CoreManager::new(LogManager::default());
+        assert!(!core_mgr.is_running());
+        assert!(core_mgr.take_exit_error().is_none());
+        assert!(!core_mgr.get_status().is_running);
+    }
+
+    #[test]
     fn test_generate_shadowsocks_singbox_config() {
         let log_mgr = LogManager::default();
         let core_mgr = CoreManager::new(log_mgr);
@@ -575,5 +890,21 @@ mod tests {
             let val_res = core_mgr.validate_config(&config);
             assert!(val_res.is_ok(), "Validation failed: {:?}", val_res.err());
         }
+    }
+
+    #[test]
+    fn test_strip_ansi_and_diagnostic_formatting() {
+        let raw = "+0300 2026-10-21 15:12:06 \x1b[36mINFO\x1b[0m network: updated\n\x1b[31mFATAL\x1b[0m[0015] start service: configure tun interface: (create adapter: Cannot create a file when that file already exists.)";
+        let stripped = strip_ansi(raw);
+        assert!(!stripped.contains("\x1b"));
+        assert!(stripped.contains("INFO network: updated"));
+        assert!(stripped.contains("FATAL[0015] start service: configure tun interface"));
+
+        let lines = vec![
+            "\x1b[36mINFO\x1b[0m normal log".to_string(),
+            "\x1b[31mFATAL\x1b[0m[0015] start service: create adapter error".to_string(),
+        ];
+        let formatted = format_diagnostic_lines(&lines);
+        assert_eq!(formatted, "FATAL[0015] start service: create adapter error");
     }
 }

@@ -2,7 +2,9 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
+use std::fs::File;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
@@ -15,6 +17,8 @@ pub struct LogEntry {
 pub struct LogManager {
     entries: Arc<RwLock<VecDeque<LogEntry>>>,
     max_entries: usize,
+    file: Arc<Mutex<Option<File>>>,
+    log_path: Arc<PathBuf>,
 }
 
 impl Default for LogManager {
@@ -23,24 +27,72 @@ impl Default for LogManager {
     }
 }
 
+/// Picks a writable location for the on-disk log.
+///
+/// The repository-local path is kept for development convenience, but it is a
+/// mapped network drive (`Z:`) that does not exist in elevated processes.
+/// Falling back to the per-user config directory guarantees that logs survive
+/// when the app runs as Administrator, which is required for TUN mode.
+fn resolve_log_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let dev_path = PathBuf::from("z:\\jvpn\\singbox.log");
+        if dev_path
+            .parent()
+            .map(|parent| parent.exists())
+            .unwrap_or(false)
+        {
+            return dev_path;
+        }
+    }
+
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rustybox")
+        .join("singbox.log")
+}
+
+fn open_log_file(path: &PathBuf) -> Option<File> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .ok()
+}
+
 impl LogManager {
     pub fn new(max_entries: usize) -> Self {
+        let log_path = resolve_log_path();
+        let file = open_log_file(&log_path);
         Self {
             entries: Arc::new(RwLock::new(VecDeque::with_capacity(max_entries))),
             max_entries,
+            file: Arc::new(Mutex::new(file)),
+            log_path: Arc::new(log_path),
         }
+    }
+
+    /// Path of the log file currently in use (may be used for diagnostics).
+    pub fn log_path(&self) -> &PathBuf {
+        &self.log_path
     }
 
     pub fn add_log(&self, level: &str, raw_message: &str) {
         let masked = mask_secrets(raw_message);
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("z:\\jvpn\\singbox.log")
-            .and_then(|mut f| {
+
+        // Serialize writes: several sing-box reader tasks log concurrently and
+        // unsynchronized appends produced interleaved, unreadable lines.
+        if let Ok(mut file) = self.file.lock() {
+            if let Some(file) = file.as_mut() {
                 use std::io::Write;
-                writeln!(f, "[{}] [{}] {}", Utc::now().to_rfc3339(), level, masked)
-            });
+                let _ = writeln!(file, "[{}] [{}] {}", Utc::now().to_rfc3339(), level, masked);
+                let _ = file.flush();
+            }
+        }
+
         if let Ok(mut entries) = self.entries.write() {
             if entries.len() >= self.max_entries {
                 entries.pop_front();
@@ -73,6 +125,7 @@ impl LogManager {
         report.push_str(&format!("Generated: {}\n", Utc::now().to_rfc3339()));
         report.push_str(&format!("OS: {}\n", os_info));
         report.push_str(&format!("Core: {}\n", core_version));
+        report.push_str(&format!("Log file: {}\n", self.log_path.display()));
         report.push_str("=== Recent Logs ===\n");
         for log in logs {
             report.push_str(&format!(

@@ -80,7 +80,20 @@ impl ConnectionManager {
     }
 
     pub fn get_status(&self) -> ConnectionStatus {
-        let state = self.get_state();
+        let mut state = self.get_state();
+
+        // The core can die on its own (TUN setup failure, server unreachable in
+        // a fatal way, crash). Without this check the UI keeps showing
+        // "Connected" while the system silently falls back to the ISP route.
+        if state == ConnectionState::Connected && !self.core_manager.is_running() {
+            let reason = self.core_manager.take_exit_error().unwrap_or_else(|| {
+                "sing-box core stopped unexpectedly, traffic is no longer routed through the VPN"
+                    .to_string()
+            });
+            self.set_error(&format!("VPN disconnected unexpectedly: {}", reason));
+            state = ConnectionState::Error;
+        }
+
         let connected_since = self.connected_since.read().ok().and_then(|t| *t);
         let error_message = self.last_error.read().ok().and_then(|e| e.clone());
         let active_profile_id = self.config_manager.get_config().active_profile_id;
@@ -308,5 +321,21 @@ mod tests {
         *mgr.state.write().unwrap() = ConnectionState::Error;
         mgr.disconnect().await.unwrap();
         assert_eq!(mgr.get_state(), ConnectionState::Disconnected);
+    }
+
+    #[tokio::test]
+    async fn test_connected_state_detects_dead_core() {
+        let mgr = setup_test_manager();
+        *mgr.state.write().unwrap() = ConnectionState::Connected;
+
+        // No core process exists, so the status must not keep reporting Connected.
+        let status = mgr.get_status();
+        assert_eq!(status.state, ConnectionState::Error);
+        assert!(status
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("unexpectedly"));
+        assert!(status.connected_since.is_none());
     }
 }
