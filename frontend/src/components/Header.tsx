@@ -6,12 +6,14 @@ interface HeaderProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
   vpnState: ConnectionState;
+  hasUpdate?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentTab,
   setCurrentTab,
   vpnState,
+  hasUpdate,
 }) => {
   const getBadgeClass = () => {
     switch (vpnState) {
@@ -106,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
         <button
           onClick={() => setCurrentTab("settings")}
-          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors relative ${
             currentTab === "settings"
               ? "border-orange-500 text-orange-400"
               : "border-transparent text-slate-400 hover:text-slate-200"
@@ -114,6 +116,9 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Settings className="w-3.5 h-3.5" />
           Settings
+          {hasUpdate && (
+            <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+          )}
         </button>
       </nav>
     </header>

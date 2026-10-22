@@ -5,7 +5,7 @@ import { ProfilesView } from "./components/ProfilesView";
 import { RoutingView } from "./components/RoutingView";
 import { SettingsView } from "./components/SettingsView";
 import { LogsView } from "./components/LogsView";
-import { api } from "./api";
+import { api, Update } from "./api";
 import {
   AppConfig,
   ConnectionStatus,
@@ -32,6 +32,7 @@ export const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [coreStatus, setCoreStatus] = useState<CoreStatus | null>(null);
   const [tunPrereqs, setTunPrereqs] = useState<TunPrerequisites | null>(null);
+  const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
 
   // Initial load
   useEffect(() => {
@@ -41,6 +42,24 @@ export const App: React.FC = () => {
       fetchStatus();
     }, 1500);
     return () => clearInterval(interval);
+  }, []);
+
+  // Check for updates on startup if enabled
+  useEffect(() => {
+    const checkUpdatesOnStartup = async () => {
+      try {
+        const c = await api.getConfig();
+        if (c.auto_check_updates !== false) {
+          const update = await api.checkForUpdates();
+          if (update) {
+            setAvailableUpdate(update);
+          }
+        }
+      } catch (e) {
+        console.warn("Background update check skipped/failed:", e);
+      }
+    };
+    checkUpdatesOnStartup();
   }, []);
 
   const loadAllData = async () => {
@@ -191,6 +210,7 @@ export const App: React.FC = () => {
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
         vpnState={status.state}
+        hasUpdate={!!availableUpdate}
       />
 
       <main className="flex-1 overflow-y-auto">
@@ -235,6 +255,8 @@ export const App: React.FC = () => {
             tunPrereqs={tunPrereqs}
             coreStatus={coreStatus}
             onSaveConfig={handleSaveConfig}
+            availableUpdate={availableUpdate}
+            onUpdateFound={setAvailableUpdate}
           />
         )}
 

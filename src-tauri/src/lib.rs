@@ -40,6 +40,8 @@ pub fn run() {
     let app_state = AppState::new();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(app_state.clone())
         .setup(move |app| {
             debug_log("setup.log", "setup called\n");

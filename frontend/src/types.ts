@@ -1,3 +1,5 @@
+export const APP_VERSION = "0.1.2";
+
 export type ConnectionState = "disconnected" | "starting" | "connected" | "stopping" | "error";
 
 export interface VlessConfig {
@@ -80,4 +82,5 @@ export interface AppConfig {
   singbox_path: string | null;
   tun_interface_name: string;
   log_level: string;
+  auto_check_updates?: boolean;
 }

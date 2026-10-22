@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { check, Update, DownloadEvent } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import {
   AppConfig,
   ConnectionStatus,
@@ -107,6 +109,7 @@ export const api = {
         singbox_path: null,
         tun_interface_name: "rustybox-tun",
         log_level: "info",
+        auto_check_updates: true,
       };
     }
     return invoke<AppConfig>("get_config");
@@ -145,4 +148,16 @@ export const api = {
     }
     return invoke<TunPrerequisites>("check_tun_prerequisites");
   },
+
+  checkForUpdates: async (): Promise<Update | null> => {
+    if (!isTauri()) return null;
+    return check();
+  },
+
+  relaunchApp: async (): Promise<void> => {
+    if (!isTauri()) return;
+    return relaunch();
+  },
 };
+
+export type { Update, DownloadEvent };

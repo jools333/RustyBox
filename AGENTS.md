@@ -195,7 +195,20 @@ When modifying [src-tauri/src/core/mod.rs](file:///z:/jvpn/src-tauri/src/core/mo
 
 ---
 
-## 7. Developer & Agent Cheat Sheet
+## 7. Auto-Update Architecture & Release Signing
+
+1. **Updater Mechanism**:
+   - RustyBox uses `@tauri-apps/plugin-updater` and `tauri-plugin-updater` targeting GitHub Releases (`https://github.com/jools333/RustyBox/releases/latest/download/latest.json`).
+   - Releases are signed with Minisign/Ed25519.
+   - The public key is configured in `src-tauri/tauri.conf.json`.
+   - The private key is provided as a secret (`TAURI_SIGNING_PRIVATE_KEY`) in GitHub Actions CI/CD.
+2. **Process Safety on Windows**:
+   - Before downloading or applying an in-app update, RustyBox disconnects any active VPN session (`ConnectionManager::disconnect`).
+   - This ensures `sing-box.exe` has terminated and `wintun.dll` / TUN interface handles are closed, avoiding `ERROR_ACCESS_DENIED` / "File In Use" errors when the installer replaces files.
+
+---
+
+## 8. Developer & Agent Cheat Sheet
 
 ### Running Tests
 ```powershell

@@ -27,6 +27,10 @@ pub enum RoutingMode {
     GlobalDirect,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     pub version: u32,
@@ -41,6 +45,8 @@ pub struct AppConfig {
     pub singbox_path: Option<String>,
     pub tun_interface_name: String,
     pub log_level: String,
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
 }
 
 impl Default for AppConfig {
@@ -61,6 +67,7 @@ impl Default for AppConfig {
             singbox_path: None,
             tun_interface_name: "rustybox-tun".to_string(),
             log_level: "info".to_string(),
+            auto_check_updates: true,
         }
     }
 }
