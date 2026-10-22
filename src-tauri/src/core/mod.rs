@@ -151,6 +151,23 @@ fn ensure_executable(path: &std::path::Path) {
 #[cfg(not(unix))]
 fn ensure_executable(_path: &std::path::Path) {}
 
+/// Normalizes a path on Windows by stripping the extended-length verbatim prefix `\\?\`
+/// or `\\?\UNC\` so that standard Win32 subprocesses, shell tools, and working directory
+/// operations handle it correctly without unexpected parsing errors.
+pub fn normalize_path(path: &std::path::Path) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let path_str = path.to_string_lossy();
+        if let Some(stripped) = path_str.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{}", stripped));
+        }
+        if let Some(stripped) = path_str.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path.to_path_buf()
+}
+
 /// Extracts (major, minor, patch) from a version string like "sing-box version 1.14.3" or "v1.14.0".
 pub fn parse_version_tuple(version_str: &str) -> Option<(u64, u64, u64)> {
     let ver_part = if let Some(idx) = version_str.find("version ") {
@@ -265,8 +282,9 @@ impl CoreManager {
     }
 
     pub fn set_resource_dir(&self, dir: PathBuf) {
+        let clean = normalize_path(&dir);
         if let Ok(mut lock) = self.resource_dir.lock() {
-            *lock = Some(dir);
+            *lock = Some(clean);
         }
     }
 
@@ -282,7 +300,7 @@ impl CoreManager {
             if let Some(ref path) = *lock {
                 if path.exists() {
                     ensure_executable(path);
-                    return Some(path.clone());
+                    return Some(normalize_path(path));
                 } else {
                     return None;
                 }
@@ -302,7 +320,7 @@ impl CoreManager {
                 for candidate in candidates {
                     if candidate.exists() {
                         ensure_executable(&candidate);
-                        return Some(candidate);
+                        return Some(normalize_path(&candidate));
                     }
                 }
             }
@@ -310,7 +328,8 @@ impl CoreManager {
 
         // 3. Locations relative to current executable (portable, installed deb, AppImage, dev)
         if let Ok(current_exe) = std::env::current_exe() {
-            if let Some(parent) = current_exe.parent() {
+            let clean_current_exe = normalize_path(&current_exe);
+            if let Some(parent) = clean_current_exe.parent() {
                 let mut candidates = vec![
                     parent.join(exe_name),
                     parent.join("bin").join(exe_name),
@@ -362,7 +381,7 @@ impl CoreManager {
                 for candidate in candidates {
                     if candidate.exists() {
                         ensure_executable(&candidate);
-                        return Some(candidate);
+                        return Some(normalize_path(&candidate));
                     }
                 }
             }
@@ -384,7 +403,7 @@ impl CoreManager {
             for candidate in linux_system_candidates {
                 if candidate.exists() {
                     ensure_executable(&candidate);
-                    return Some(candidate);
+                    return Some(normalize_path(&candidate));
                 }
             }
         }
@@ -393,17 +412,17 @@ impl CoreManager {
         let local_bin = PathBuf::from("bin").join(exe_name);
         if local_bin.exists() {
             ensure_executable(&local_bin);
-            return Some(local_bin);
+            return Some(normalize_path(&local_bin));
         }
         let local_root = PathBuf::from(exe_name);
         if local_root.exists() {
             ensure_executable(&local_root);
-            return Some(local_root);
+            return Some(normalize_path(&local_root));
         }
 
         // 6. System PATH only as last resort
         if let Ok(path) = which::which(exe_name) {
-            return Some(path);
+            return Some(normalize_path(&path));
         }
 
         None
@@ -416,7 +435,7 @@ impl CoreManager {
             }
         }
 
-        let binary = self.find_binary().ok_or(CoreError::BinaryNotFound)?;
+        let binary = normalize_path(&self.find_binary().ok_or(CoreError::BinaryNotFound)?);
         let mut cmd = std::process::Command::new(&binary);
         if let Some(parent) = binary.parent() {
             cmd.current_dir(parent);
@@ -654,7 +673,7 @@ impl CoreManager {
     }
 
     pub fn validate_config(&self, config: &serde_json::Value) -> Result<(), CoreError> {
-        let binary = self.find_binary().ok_or(CoreError::BinaryNotFound)?;
+        let binary = normalize_path(&self.find_binary().ok_or(CoreError::BinaryNotFound)?);
         let version = self.get_version()?;
         validate_singbox_version(&version, &binary)?;
 
@@ -702,7 +721,7 @@ impl CoreManager {
             }
         }
 
-        let binary = self.find_binary().ok_or(CoreError::BinaryNotFound)?;
+        let binary = normalize_path(&self.find_binary().ok_or(CoreError::BinaryNotFound)?);
         self.validate_config(&config)?;
 
         let temp_dir = std::env::temp_dir();
@@ -925,9 +944,9 @@ impl CoreManager {
                 unsafe {
                     GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
                 }
-                // Wait up to 2.5s for graceful exit
+                // Wait up to 6s for graceful exit (routes restore and Wintun adapter cleanup)
                 let graceful_exit =
-                    tokio::time::timeout(Duration::from_millis(2500), proc.child.wait()).await;
+                    tokio::time::timeout(Duration::from_millis(6000), proc.child.wait()).await;
 
                 if graceful_exit.is_err() {
                     let _ = proc.child.kill().await;
@@ -1130,5 +1149,31 @@ mod tests {
 
         core_mgr.set_resource_dir(temp_dir.path().to_path_buf());
         assert_eq!(core_mgr.find_binary(), Some(dummy_bin));
+    }
+
+    #[test]
+    fn test_normalize_path() {
+        #[cfg(target_os = "windows")]
+        {
+            assert_eq!(
+                normalize_path(std::path::Path::new(r"\\?\C:\Users\app\sing-box.exe")),
+                PathBuf::from(r"C:\Users\app\sing-box.exe")
+            );
+            assert_eq!(
+                normalize_path(std::path::Path::new(r"\\?\UNC\server\share\sing-box.exe")),
+                PathBuf::from(r"\\server\share\sing-box.exe")
+            );
+            assert_eq!(
+                normalize_path(std::path::Path::new(r"C:\Users\app\sing-box.exe")),
+                PathBuf::from(r"C:\Users\app\sing-box.exe")
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert_eq!(
+                normalize_path(std::path::Path::new("/usr/bin/sing-box")),
+                PathBuf::from("/usr/bin/sing-box")
+            );
+        }
     }
 }

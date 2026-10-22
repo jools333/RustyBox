@@ -141,36 +141,45 @@ impl TunManager {
 
     /// Removes any orphaned or disconnected Wintun / sing-tun network adapters
     /// and conflicting IP addresses left over from an abrupt termination or crash.
-    pub fn cleanup_stale_adapter(&self, _interface_name: &str) {
+    pub fn cleanup_stale_adapter(&self, interface_name: &str) {
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-            // 1. Remove conflicting IP address 172.19.0.1 if still bound to any leftover adapter
+            // 1. Remove conflicting IP address 172.19.0.1 if bound to our leftover adapter
             let _ = std::process::Command::new("powershell")
                 .args([
                     "-NoProfile",
                     "-NonInteractive",
                     "-Command",
-                    "Get-NetIPAddress -IPAddress 172.19.0.1 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
+                    &format!(
+                        "Get-NetIPAddress -IPAddress 172.19.0.1 -ErrorAction SilentlyContinue | Where-Object {{ $_.InterfaceAlias -eq '{}' }} | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
+                        interface_name
+                    ),
                 ])
                 .creation_flags(CREATE_NO_WINDOW)
                 .status();
 
-            // 2. Scan pnputil for any leftover sing-tun / Wintun devices and remove them
+            // 2. Scan pnputil for DISCONNECTED/orphaned Wintun devices and remove them.
+            // NEVER remove working/active adapters (which might belong to active VPNs or current session).
             if let Ok(output) = std::process::Command::new("pnputil")
                 .args(["/enum-devices", "/class", "Net"])
                 .creation_flags(CREATE_NO_WINDOW)
                 .output()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let stale_instances = parse_all_wintun_instances(&stdout);
+                let stale_instances = parse_disconnected_wintun_instances(&stdout);
+                let removed_any = !stale_instances.is_empty();
                 for instance in stale_instances {
                     let _ = std::process::Command::new("pnputil")
                         .args(["/remove-device", &instance])
                         .creation_flags(CREATE_NO_WINDOW)
                         .status();
+                }
+                // If any device was removed, give Windows PnP manager a brief moment to settle
+                if removed_any {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
                 }
             }
         }
