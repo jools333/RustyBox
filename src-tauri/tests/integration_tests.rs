@@ -49,6 +49,24 @@ fn test_scenario_02_parse_valid_shadowsocks_uri() {
     } else {
         panic!("Expected Shadowsocks protocol config");
     }
+
+    // Shadowsocks 2022 multi-user URI with percent-encoded key pair
+    let uri_2022_multi = "ss://2022-blake3-aes-256-gcm:eJLKUbnWBkXSgMfvFhOkm8kwNPl276dlduExy7WRDdY%3D%3Akuud4PF5VKYiaspCvsZ4qNaqZGI4MAQkNM8AaIKtT%2Fg%3D@jools.com.ru:39674#z041uzf1";
+    let profile_2022 =
+        parse_profile_uri(uri_2022_multi).expect("Valid 2022 multi-user SS URI should parse");
+    assert_eq!(profile_2022.name, "z041uzf1");
+    assert_eq!(profile_2022.server, "jools.com.ru");
+    assert_eq!(profile_2022.port, 39674);
+
+    if let ProtocolConfig::Shadowsocks(cfg) = profile_2022.protocol {
+        assert_eq!(cfg.method, "2022-blake3-aes-256-gcm");
+        assert_eq!(
+            cfg.password,
+            "eJLKUbnWBkXSgMfvFhOkm8kwNPl276dlduExy7WRDdY=:kuud4PF5VKYiaspCvsZ4qNaqZGI4MAQkNM8AaIKtT/g="
+        );
+    } else {
+        panic!("Expected Shadowsocks protocol config");
+    }
 }
 
 // 3. Scenario 3: Reject invalid URIs

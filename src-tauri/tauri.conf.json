@@ -47,6 +47,14 @@
     ],
     "resources": {
       "../bin/*": "bin/"
+    },
+    "linux": {
+      "deb": {
+        "recommends": [
+          "libcap2-bin"
+        ],
+        "postInstallScript": "../scripts/postinst.sh"
+      }
     }
   }
 }

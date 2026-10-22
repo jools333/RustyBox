@@ -172,8 +172,8 @@ pub fn mask_secrets(input: &str) -> String {
         out = re_pbk.replace_all(&out, "${1}[MASKED-KEY]").to_string();
     }
 
-    // Mask Shadowsocks URI payload: ss://[base64]@...
-    if let Ok(re_ss) = Regex::new(r#"(?i)ss://([A-Za-z0-9+/=]+)@"#) {
+    // Mask Shadowsocks URI payload: ss://[credentials]@...
+    if let Ok(re_ss) = Regex::new(r#"(?i)ss://([^@\s\r\n]+)@"#) {
         out = re_ss
             .replace_all(&out, "ss://[MASKED-CREDENTIALS]@")
             .to_string();
@@ -216,5 +216,13 @@ mod tests {
         let masked = mask_secrets(uri);
         assert!(!masked.contains("enlGdIoYJfgX5TRxi5iQnDDFG"));
         assert!(masked.contains("pbk=[MASKED-KEY]"));
+    }
+
+    #[test]
+    fn test_mask_shadowsocks_uri() {
+        let uri = "ss://2022-blake3-aes-256-gcm:eJLKUbnWBkXSgMfvFhOkm8kwNPl276dlduExy7WRDdY%3D%3Akuud4PF5VKYiaspCvsZ4qNaqZGI4MAQkNM8AaIKtT%2Fg%3D@jools.com.ru:39674#z041uzf1";
+        let masked = mask_secrets(uri);
+        assert!(!masked.contains("eJLKUbnWBkXSgMfvFhOkm8kwNPl276dlduExy7WRDdY"));
+        assert!(masked.contains("ss://[MASKED-CREDENTIALS]@jools.com.ru:39674#z041uzf1"));
     }
 }

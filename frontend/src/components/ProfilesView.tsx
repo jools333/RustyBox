@@ -348,6 +348,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                       <option value="aes-128-gcm">aes-128-gcm</option>
                       <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
                       <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
+                      <option value="2022-blake3-chacha20-poly1305">2022-blake3-chacha20-poly1305</option>
                     </select>
                   </div>
                   <div>

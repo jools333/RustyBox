@@ -213,6 +213,51 @@ fn decode_base64_flexible(input: &str) -> Result<Vec<u8>, ProfileError> {
         .map_err(|e| ProfileError::InvalidShadowsocksPayload(e.to_string()))
 }
 
+fn parse_shadowsocks_userinfo(user_info_raw: &str) -> Result<(String, String), ProfileError> {
+    // 1. If user_info_raw contains a colon, it is in plaintext `method:password` format (SIP002 modern/unencoded)
+    // where method or password may contain percent-encoded characters.
+    if let Some((method_raw, password_raw)) = user_info_raw.split_once(':') {
+        let method = percent_decode_str(method_raw)
+            .decode_utf8()
+            .map_err(|e| ProfileError::InvalidShadowsocksPayload(e.to_string()))?
+            .to_string();
+        let password = percent_decode_str(password_raw)
+            .decode_utf8()
+            .map_err(|e| ProfileError::InvalidShadowsocksPayload(e.to_string()))?
+            .to_string();
+        return Ok((method, password));
+    }
+
+    // 2. Try Base64 decoding (standard SIP002 base64(method:password))
+    if let Ok(decoded_bytes) = decode_base64_flexible(user_info_raw) {
+        if let Ok(decoded_str) = String::from_utf8(decoded_bytes) {
+            if let Some((method_raw, password_raw)) = decoded_str.split_once(':') {
+                let method = percent_decode_str(method_raw)
+                    .decode_utf8()
+                    .map_err(|e| ProfileError::InvalidShadowsocksPayload(e.to_string()))?
+                    .to_string();
+                let password = percent_decode_str(password_raw)
+                    .decode_utf8()
+                    .map_err(|e| ProfileError::InvalidShadowsocksPayload(e.to_string()))?
+                    .to_string();
+                return Ok((method, password));
+            }
+        }
+    }
+
+    // 3. Try percent-decoding user_info_raw in case the separating colon was encoded as %3A
+    let pct_decoded = percent_decode_str(user_info_raw)
+        .decode_utf8()
+        .map_err(|e| ProfileError::InvalidShadowsocksPayload(e.to_string()))?;
+    if let Some((method_raw, password_raw)) = pct_decoded.split_once(':') {
+        return Ok((method_raw.to_string(), password_raw.to_string()));
+    }
+
+    Err(ProfileError::InvalidShadowsocksPayload(
+        "Missing colon in method:password".to_string(),
+    ))
+}
+
 fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
     let trimmed = raw_uri.trim();
     if !trimmed.starts_with("ss://") {
@@ -228,27 +273,33 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
     };
 
     let name = match fragment {
-        Some(frag) => percent_decode_str(frag)
-            .decode_utf8()
-            .unwrap_or_default()
-            .to_string(),
+        Some(frag) => {
+            let decoded = percent_decode_str(frag)
+                .decode_utf8()
+                .unwrap_or_default()
+                .to_string();
+            if decoded.trim().is_empty() {
+                "Shadowsocks Server".to_string()
+            } else {
+                decoded
+            }
+        }
         None => "Shadowsocks Server".to_string(),
     };
 
-    if let Some((user_info_b64, host_port)) = body.split_once('@') {
-        let decoded_user_info = decode_base64_flexible(user_info_b64)?;
-        let user_info_str = String::from_utf8(decoded_user_info)
-            .map_err(|e| ProfileError::InvalidShadowsocksPayload(e.to_string()))?;
+    if let Some((user_info_raw, host_port)) = body.split_once('@') {
+        let (method, password) = parse_shadowsocks_userinfo(user_info_raw)?;
 
-        let (method, password) = user_info_str.split_once(':').ok_or_else(|| {
-            ProfileError::InvalidShadowsocksPayload("Missing colon in method:password".to_string())
-        })?;
-
-        let host_port_clean = host_port.split('?').next().unwrap_or(host_port);
-        let (server, port_str) = host_port_clean.rsplit_once(':').ok_or_else(|| {
+        let host_port_clean = host_port
+            .split('?')
+            .next()
+            .unwrap_or(host_port)
+            .trim_end_matches('/');
+        let (server_raw, port_str) = host_port_clean.rsplit_once(':').ok_or_else(|| {
             ProfileError::InvalidHostOrPort("Missing port in server:port".to_string())
         })?;
 
+        let server = server_raw.trim_start_matches('[').trim_end_matches(']');
         let port: u16 = port_str
             .parse()
             .map_err(|_| ProfileError::InvalidHostOrPort(format!("Invalid port: {}", port_str)))?;
@@ -258,10 +309,7 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
             name,
             server: server.to_string(),
             port,
-            protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig {
-                method: method.to_string(),
-                password: password.to_string(),
-            }),
+            protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
             latency_ms: None,
         });
     }
@@ -274,14 +322,18 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         ProfileError::InvalidShadowsocksPayload("Missing @ in decoded ss payload".to_string())
     })?;
 
-    let (method, password) = user_info.split_once(':').ok_or_else(|| {
-        ProfileError::InvalidShadowsocksPayload("Missing colon in method:password".to_string())
-    })?;
+    let (method, password) = parse_shadowsocks_userinfo(user_info)?;
 
-    let (server, port_str) = host_port.rsplit_once(':').ok_or_else(|| {
+    let host_port_clean = host_port
+        .split('?')
+        .next()
+        .unwrap_or(host_port)
+        .trim_end_matches('/');
+    let (server_raw, port_str) = host_port_clean.rsplit_once(':').ok_or_else(|| {
         ProfileError::InvalidHostOrPort("Missing port in server:port".to_string())
     })?;
 
+    let server = server_raw.trim_start_matches('[').trim_end_matches(']');
     let port: u16 = port_str
         .parse()
         .map_err(|_| ProfileError::InvalidHostOrPort(format!("Invalid port: {}", port_str)))?;
@@ -291,10 +343,7 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         name,
         server: server.to_string(),
         port,
-        protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig {
-            method: method.to_string(),
-            password: password.to_string(),
-        }),
+        protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
         latency_ms: None,
     })
 }
@@ -408,6 +457,41 @@ mod tests {
             ProtocolConfig::Shadowsocks(cfg) => {
                 assert_eq!(cfg.method, "chacha20-ietf-poly1305");
                 assert_eq!(cfg.password, "mypassword123");
+            }
+            _ => panic!("Expected Shadowsocks config"),
+        }
+    }
+
+    #[test]
+    fn test_parse_valid_shadowsocks_2022_multi_user() {
+        let uri = "ss://2022-blake3-aes-256-gcm:eJLKUbnWBkXSgMfvFhOkm8kwNPl276dlduExy7WRDdY%3D%3Akuud4PF5VKYiaspCvsZ4qNaqZGI4MAQkNM8AaIKtT%2Fg%3D@jools.com.ru:39674#z041uzf1";
+        let profile = parse_profile_uri(uri).expect("Should parse Shadowsocks 2022 multi-user URI");
+        assert_eq!(profile.name, "z041uzf1");
+        assert_eq!(profile.server, "jools.com.ru");
+        assert_eq!(profile.port, 39674);
+        match profile.protocol {
+            ProtocolConfig::Shadowsocks(cfg) => {
+                assert_eq!(cfg.method, "2022-blake3-aes-256-gcm");
+                assert_eq!(
+                    cfg.password,
+                    "eJLKUbnWBkXSgMfvFhOkm8kwNPl276dlduExy7WRDdY=:kuud4PF5VKYiaspCvsZ4qNaqZGI4MAQkNM8AaIKtT/g="
+                );
+            }
+            _ => panic!("Expected Shadowsocks config"),
+        }
+    }
+
+    #[test]
+    fn test_parse_valid_shadowsocks_plain_sip002() {
+        let uri = "ss://aes-128-gcm:plainpassword@myhost.net:8388#PlainSS";
+        let profile = parse_profile_uri(uri).expect("Should parse plain SIP002 Shadowsocks URI");
+        assert_eq!(profile.name, "PlainSS");
+        assert_eq!(profile.server, "myhost.net");
+        assert_eq!(profile.port, 8388);
+        match profile.protocol {
+            ProtocolConfig::Shadowsocks(cfg) => {
+                assert_eq!(cfg.method, "aes-128-gcm");
+                assert_eq!(cfg.password, "plainpassword");
             }
             _ => panic!("Expected Shadowsocks config"),
         }
