@@ -79,7 +79,7 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               <span className="font-semibold block text-amber-200">
                 Administrator Rights Required
               </span>
-              TUN mode needs administrator privileges to configure network routes. Please right-click RustyBox and choose "Run as administrator".
+              TUN mode needs administrator or CAP_NET_ADMIN privileges to configure network routes.
             </div>
           </div>
         )}

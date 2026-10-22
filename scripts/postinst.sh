@@ -21,6 +21,31 @@ case "$1" in
                 fi
             fi
         done
+
+        # Automatically configure Polkit rule for systemd-resolved.
+        # When sing-box uses TUN in auto_route mode, it configures per-link DNS via D-Bus / resolvectl.
+        # This rule allows active local desktop users to apply TUN DNS settings without password prompts.
+        POLKIT_RULES_DIR="/etc/polkit-1/rules.d"
+        if [ ! -d "$POLKIT_RULES_DIR" ]; then
+            POLKIT_RULES_DIR="/usr/share/polkit-1/rules.d"
+        fi
+
+        if [ -d "$POLKIT_RULES_DIR" ]; then
+            cat << 'EOF' > "$POLKIT_RULES_DIR/60-rustybox-resolved.rules"
+// Allow active local desktop users to configure per-link DNS via systemd-resolved
+// for RustyBox VPN without interactive Polkit password prompts.
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.resolve1.set-dns-servers" ||
+         action.id == "org.freedesktop.resolve1.set-domains" ||
+         action.id == "org.freedesktop.resolve1.set-default-route" ||
+         action.id == "org.freedesktop.resolve1.revert") &&
+        subject.active == true && subject.local == true) {
+        return polkit.Result.YES;
+    }
+});
+EOF
+            chmod 644 "$POLKIT_RULES_DIR/60-rustybox-resolved.rules"
+        fi
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
         ;;

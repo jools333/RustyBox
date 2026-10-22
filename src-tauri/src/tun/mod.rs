@@ -20,7 +20,7 @@ impl TunManager {
     pub fn check_prerequisites(&self, singbox_binary_path: Option<&Path>) -> TunPrerequisites {
         let mut details = Vec::new();
         let mut has_driver = false;
-        let is_elevated = check_elevation();
+        let mut is_elevated = check_elevation();
 
         #[cfg(not(target_os = "windows"))]
         {
@@ -106,6 +106,38 @@ impl TunManager {
             }
 
             if !is_elevated {
+                if let Some(bin_path) = singbox_binary_path {
+                    if check_binary_cap_net_admin(bin_path) {
+                        is_elevated = true;
+                        details.push(format!(
+                            "sing-box binary has CAP_NET_ADMIN capability: {}",
+                            bin_path.display()
+                        ));
+                    }
+                } else {
+                    let candidates = [
+                        Path::new("/usr/lib/RustyBox/bin/sing-box"),
+                        Path::new("/usr/lib/rustybox/bin/sing-box"),
+                    ];
+                    for candidate in candidates {
+                        if candidate.exists() && check_binary_cap_net_admin(candidate) {
+                            is_elevated = true;
+                            details.push(format!(
+                                "Found sing-box with CAP_NET_ADMIN capability: {}",
+                                candidate.display()
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if is_elevated {
+                details.push(
+                    "Elevation check passed (root or CAP_NET_ADMIN capability detected)."
+                        .to_string(),
+                );
+            } else {
                 details.push("Root privileges or CAP_NET_ADMIN capability required for TUN network operations.".to_string());
             }
         }
@@ -329,8 +361,8 @@ pub fn check_elevation() -> bool {
 
     #[cfg(target_os = "linux")]
     {
-        // On Linux, EUID == 0 means root
-        libc_or_zero() == 0
+        // On Linux, EUID == 0 means root, or current process has CAP_NET_ADMIN
+        libc_or_zero() == 0 || current_process_has_cap_net_admin()
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
@@ -349,6 +381,75 @@ fn libc_or_zero() -> u32 {
         .and_then(|out| String::from_utf8(out.stdout).ok())
         .and_then(|s| s.trim().parse::<u32>().ok())
         .unwrap_or(1)
+}
+
+#[cfg(target_os = "linux")]
+fn current_process_has_cap_net_admin() -> bool {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(stripped) = line.strip_prefix("CapEff:\t") {
+                if let Ok(val) = u64::from_str_radix(stripped.trim(), 16) {
+                    if (val & (1 << 12)) != 0 {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "linux")]
+pub fn check_binary_cap_net_admin(binary_path: &Path) -> bool {
+    // 1. Try running getcap tool
+    let getcap_candidates = ["getcap", "/usr/sbin/getcap", "/sbin/getcap"];
+    for getcap in &getcap_candidates {
+        if let Ok(output) = std::process::Command::new(getcap).arg(binary_path).output() {
+            if output.status.success() {
+                let out = String::from_utf8_lossy(&output.stdout);
+                if out.contains("cap_net_admin") {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 2. Direct xattr fallback: inspect security.capability via libc getxattr
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    extern "C" {
+        fn getxattr(
+            path: *const std::os::raw::c_char,
+            name: *const std::os::raw::c_char,
+            value: *mut std::os::raw::c_void,
+            size: usize,
+        ) -> isize;
+    }
+
+    if let Ok(c_path) = CString::new(binary_path.as_os_str().as_bytes()) {
+        if let Ok(attr) = CString::new("security.capability") {
+            let mut buf = [0u8; 64];
+            let res = unsafe {
+                getxattr(
+                    c_path.as_ptr(),
+                    attr.as_ptr(),
+                    buf.as_mut_ptr() as *mut _,
+                    buf.len(),
+                )
+            };
+            if res >= 8 {
+                // Byte 4..8 contains permitted capability bitmask.
+                // CAP_NET_ADMIN is capability bit 12 (1 << 12 = 0x1000).
+                let permitted = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
+                if (permitted & (1 << 12)) != 0 {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -415,5 +516,24 @@ Status:                     Disconnected
         assert_eq!(all.len(), 2);
         assert_eq!(all[0], r"SWD\Wintun\{5AB05583-B50F-8579-BBD8-7243AE1FBEF5}");
         assert_eq!(all[1], r"SWD\Wintun\{1BF0EB02-8C39-B209-F8B5-8B00F51DB18B}");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_linux_capabilities_prerequisites() {
+        let mgr = TunManager::new();
+        let target = Path::new("/usr/lib/RustyBox/bin/sing-box");
+        if target.exists() {
+            let has_cap = check_binary_cap_net_admin(target);
+            assert!(
+                has_cap,
+                "Installed /usr/lib/RustyBox/bin/sing-box should have CAP_NET_ADMIN"
+            );
+            let prereqs = mgr.check_prerequisites(Some(target));
+            assert!(
+                prereqs.is_elevated,
+                "Prerequisites must report is_elevated=true when binary has capability"
+            );
+        }
     }
 }

@@ -148,10 +148,8 @@ fn parse_vless_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
             "fp" => fp = Some(v.to_string()),
             "pbk" => pbk = Some(v.to_string()),
             "sid" => sid = Some(v.to_string()),
-            "flow" => {
-                if !v.is_empty() {
-                    flow = Some(v.to_string());
-                }
+            "flow" if !v.is_empty() => {
+                flow = Some(v.to_string());
             }
             "type" => network = Some(v.to_string()),
             _ => {}
