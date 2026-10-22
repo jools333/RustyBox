@@ -142,6 +142,7 @@ impl TunManager {
     /// Removes any orphaned or disconnected Wintun / sing-tun network adapters
     /// and conflicting IP addresses left over from an abrupt termination or crash.
     pub fn cleanup_stale_adapter(&self, interface_name: &str) {
+        let _ = interface_name;
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
