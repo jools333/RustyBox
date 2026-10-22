@@ -42,6 +42,29 @@ impl TunManager {
             }
 
             if !driver_found {
+                if let Ok(current_exe) = std::env::current_exe() {
+                    if let Some(parent) = current_exe.parent() {
+                        let candidates = [
+                            parent.join("wintun.dll"),
+                            parent.join("bin").join("wintun.dll"),
+                            parent.join("resources").join("wintun.dll"),
+                            parent.join("resources").join("bin").join("wintun.dll"),
+                            parent.join("_up_").join("bin").join("wintun.dll"),
+                            parent.join("_up_").join("wintun.dll"),
+                        ];
+                        for candidate in candidates {
+                            if candidate.exists() {
+                                driver_found = true;
+                                details
+                                    .push(format!("Found wintun.dll at {}", candidate.display()));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !driver_found {
                 // Check current working dir and ./bin
                 if Path::new("wintun.dll").exists() {
                     driver_found = true;

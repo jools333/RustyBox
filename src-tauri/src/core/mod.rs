@@ -228,21 +228,18 @@ impl CoreManager {
 
         if let Ok(current_exe) = std::env::current_exe() {
             if let Some(parent) = current_exe.parent() {
-                let candidate = parent.join(exe_name);
-                if candidate.exists() {
-                    return Some(candidate);
-                }
-                let candidate_bin = parent.join("bin").join(exe_name);
-                if candidate_bin.exists() {
-                    return Some(candidate_bin);
-                }
-                let candidate_res = parent.join("resources").join(exe_name);
-                if candidate_res.exists() {
-                    return Some(candidate_res);
-                }
-                let candidate_res_bin = parent.join("resources").join("bin").join(exe_name);
-                if candidate_res_bin.exists() {
-                    return Some(candidate_res_bin);
+                let candidates = [
+                    parent.join(exe_name),
+                    parent.join("bin").join(exe_name),
+                    parent.join("resources").join(exe_name),
+                    parent.join("resources").join("bin").join(exe_name),
+                    parent.join("_up_").join("bin").join(exe_name),
+                    parent.join("_up_").join(exe_name),
+                ];
+                for candidate in candidates {
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
                 }
             }
         }
@@ -272,6 +269,9 @@ impl CoreManager {
 
         let binary = self.find_binary().ok_or(CoreError::BinaryNotFound)?;
         let mut cmd = std::process::Command::new(&binary);
+        if let Some(parent) = binary.parent() {
+            cmd.current_dir(parent);
+        }
         cmd.arg("version");
         #[cfg(target_os = "windows")]
         {
@@ -513,6 +513,9 @@ impl CoreManager {
         std::fs::write(&temp_config, json_str)?;
 
         let mut cmd = std::process::Command::new(&binary);
+        if let Some(parent) = binary.parent() {
+            cmd.current_dir(parent);
+        }
         cmd.arg("check").arg("-c").arg(&temp_config);
         #[cfg(target_os = "windows")]
         {
@@ -574,6 +577,9 @@ impl CoreManager {
         }
 
         let mut cmd = Command::new(&binary);
+        if let Some(parent) = binary.parent() {
+            cmd.current_dir(parent);
+        }
         cmd.arg("run")
             .arg("-c")
             .arg(&config_path)
@@ -906,5 +912,17 @@ mod tests {
         ];
         let formatted = format_diagnostic_lines(&lines);
         assert_eq!(formatted, "FATAL[0015] start service: create adapter error");
+    }
+
+    #[test]
+    fn test_custom_binary_path() {
+        let core_mgr = CoreManager::new(LogManager::default());
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let path = temp.path().to_path_buf();
+        core_mgr.set_custom_binary_path(Some(path.clone()));
+        assert_eq!(core_mgr.find_binary(), Some(path));
+
+        core_mgr.set_custom_binary_path(Some(PathBuf::from("/nonexistent/sing-box")));
+        assert_eq!(core_mgr.find_binary(), None);
     }
 }
