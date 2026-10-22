@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { Power, Globe, AlertTriangle, Clock, Activity } from "lucide-react";
-import { ConnectionStatus, Profile } from "../types";
+import { Power, Globe, AlertTriangle, Clock, Activity, ShieldAlert } from "lucide-react";
+import { ConnectionStatus, Profile, TunPrerequisites } from "../types";
 
 interface ConnectionPanelProps {
   status: ConnectionStatus;
   profiles: Profile[];
+  tunPrereqs?: TunPrerequisites | null;
   onConnect: () => void;
   onDisconnect: () => void;
   onSelectProfile: (id: string) => void;
@@ -13,6 +14,7 @@ interface ConnectionPanelProps {
 export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   status,
   profiles,
+  tunPrereqs,
   onConnect,
   onDisconnect,
   onSelectProfile,
@@ -67,6 +69,19 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               </option>
             ))}
           </select>
+        )}
+
+        {/* Admin Elevation Warning Banner */}
+        {tunPrereqs && !tunPrereqs.is_elevated && (
+          <div className="mt-3 p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl flex items-start gap-2.5 text-amber-300 text-xs">
+            <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+            <div className="flex-1">
+              <span className="font-semibold block text-amber-200">
+                Administrator Rights Required
+              </span>
+              TUN mode needs administrator privileges to configure network routes. Please right-click RustyBox and choose "Run as administrator".
+            </div>
+          </div>
         )}
       </div>
 

@@ -100,7 +100,14 @@ export const App: React.FC = () => {
       await api.connectVpn();
       fetchStatus();
     } catch (e: any) {
-      alert("Connect failed: " + (e?.message || String(e)));
+      const msg = e?.message || String(e);
+      if (msg.includes("Access is denied") || msg.includes("Administrator privileges")) {
+        alert(
+          "Administrator privileges required!\n\nTUN mode requires administrator privileges to create and configure the virtual network adapter on Windows.\n\nPlease close RustyBox, right-click its icon, and select 'Run as administrator'."
+        );
+      } else {
+        alert("Connect failed: " + msg);
+      }
     }
   };
 
@@ -218,6 +225,7 @@ export const App: React.FC = () => {
           <ConnectionPanel
             status={status}
             profiles={profiles}
+            tunPrereqs={tunPrereqs}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
             onSelectProfile={handleSelectProfile}

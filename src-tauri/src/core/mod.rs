@@ -696,6 +696,11 @@ impl CoreManager {
                 let details = self.recent_output_text();
                 let message = if details.is_empty() {
                     format!("sing-box exited during startup ({})", status)
+                } else if details.contains("Access is denied") {
+                    format!(
+                        "sing-box exited during startup ({}): {}. Administrator privileges are required to configure the TUN interface on Windows. Please run RustyBox as Administrator.",
+                        status, details
+                    )
                 } else {
                     format!("sing-box exited during startup ({}): {}", status, details)
                 };

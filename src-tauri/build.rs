@@ -33,7 +33,33 @@ fn main() {
         let tauri_conf = manifest_dir.join("tauri.conf.json");
         let ico_path = manifest_dir.join("icons").join("icon.ico");
 
-        let win_attrs = tauri_build::WindowsAttributes::new().window_icon_path(ico_path);
+        let manifest = r#"
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+</assembly>
+"#;
+
+        let win_attrs = tauri_build::WindowsAttributes::new()
+            .window_icon_path(ico_path)
+            .app_manifest(manifest);
         let attrs = tauri_build::Attributes::new()
             .config_path(tauri_conf)
             .windows_attributes(win_attrs);

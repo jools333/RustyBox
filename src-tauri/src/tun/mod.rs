@@ -140,35 +140,32 @@ impl TunManager {
     }
 
     /// Removes any orphaned or disconnected Wintun / sing-tun network adapters
-    /// left over from an abrupt termination or crash.
-    pub fn cleanup_stale_adapter(&self, interface_name: &str) {
+    /// and conflicting IP addresses left over from an abrupt termination or crash.
+    pub fn cleanup_stale_adapter(&self, _interface_name: &str) {
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-            // 1. Remove orphaned net adapter if present
+            // 1. Remove conflicting IP address 172.19.0.1 if still bound to any leftover adapter
             let _ = std::process::Command::new("powershell")
                 .args([
                     "-NoProfile",
                     "-NonInteractive",
                     "-Command",
-                    &format!(
-                        "Get-NetAdapter -Name '{}' -ErrorAction SilentlyContinue | Remove-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue",
-                        interface_name
-                    ),
+                    "Get-NetIPAddress -IPAddress 172.19.0.1 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
                 ])
                 .creation_flags(CREATE_NO_WINDOW)
                 .status();
 
-            // 2. Scan pnputil for disconnected Wintun devices and remove them
+            // 2. Scan pnputil for any leftover sing-tun / Wintun devices and remove them
             if let Ok(output) = std::process::Command::new("pnputil")
                 .args(["/enum-devices", "/class", "Net"])
                 .creation_flags(CREATE_NO_WINDOW)
                 .output()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let stale_instances = parse_disconnected_wintun_instances(&stdout);
+                let stale_instances = parse_all_wintun_instances(&stdout);
                 for instance in stale_instances {
                     let _ = std::process::Command::new("pnputil")
                         .args(["/remove-device", &instance])
@@ -182,6 +179,45 @@ impl TunManager {
             let _ = interface_name;
         }
     }
+}
+
+/// Parses the output of `pnputil /enum-devices /class Net` to find instance IDs
+/// of all Wintun / sing-tun devices so they can be cleaned up before a new connection.
+pub fn parse_all_wintun_instances(pnputil_output: &str) -> Vec<String> {
+    let mut instances = Vec::new();
+    let mut current_instance: Option<String> = None;
+    let mut is_wintun = false;
+
+    for line in pnputil_output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if let Some(id) = current_instance.take() {
+                if is_wintun {
+                    instances.push(id);
+                }
+            }
+            current_instance = None;
+            is_wintun = false;
+            continue;
+        }
+
+        let lower = trimmed.to_lowercase();
+        if let Some(idx) = trimmed.find(r"SWD\Wintun\") {
+            let id = trimmed[idx..].trim().to_string();
+            current_instance = Some(id);
+            is_wintun = true;
+        } else if lower.contains("sing-tun") || lower.contains("wintun") {
+            is_wintun = true;
+        }
+    }
+
+    if let Some(id) = current_instance {
+        if is_wintun {
+            instances.push(id);
+        }
+    }
+
+    instances
 }
 
 /// Parses the output of `pnputil /enum-devices /class Net` to find instance IDs
@@ -349,5 +385,29 @@ Status:                     Disconnected
             stale[0],
             r"SWD\Wintun\{5AB05583-B50F-8579-BBD8-7243AE1FBEF5}"
         );
+    }
+
+    #[test]
+    fn test_parse_all_wintun_instances() {
+        let sample = r#"
+Instance ID:                SWD\Wintun\{5AB05583-B50F-8579-BBD8-7243AE1FBEF5}
+Device Description:         sing-tun Tunnel
+Class Name:                 Net
+Status:                     Отключено
+
+Instance ID:                SWD\Wintun\{1BF0EB02-8C39-B209-F8B5-8B00F51DB18B}
+Device Description:         sing-tun Tunnel
+Class Name:                 Net
+Status:                     Работает
+
+Instance ID:                ROOT\NET\0000
+Device Description:         Other Adapter
+Class Name:                 Net
+Status:                     Disconnected
+"#;
+        let all = parse_all_wintun_instances(sample);
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0], r"SWD\Wintun\{5AB05583-B50F-8579-BBD8-7243AE1FBEF5}");
+        assert_eq!(all[1], r"SWD\Wintun\{1BF0EB02-8C39-B209-F8B5-8B00F51DB18B}");
     }
 }
