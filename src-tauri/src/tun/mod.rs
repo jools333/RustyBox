@@ -174,10 +174,6 @@ impl TunManager {
                 }
             }
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = interface_name;
-        }
     }
 }
 
