@@ -16,8 +16,32 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create_release.outputs.id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create or Update Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+          name: "RustyBox ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
+          body: 'Automated release of RustyBox desktop VPN client for Windows (.exe / .msi) and Linux (.deb / .AppImage).'
+          draft: false
+          prerelease: false
+
   release:
     name: Build (${{ matrix.platform }})
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -76,6 +100,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tauriScript: "npx @tauri-apps/cli"
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           tagName: "${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
           releaseName: "RustyBox ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
           releaseBody: 'Automated release of RustyBox desktop VPN client for Windows (.exe / .msi) and Linux (.deb / .AppImage).'
