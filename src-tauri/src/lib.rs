@@ -46,6 +46,12 @@ pub fn run() {
         .setup(move |app| {
             debug_log("setup.log", "setup called\n");
 
+            // Register official resource directory for CoreManager
+            if let Ok(resource_dir) = app.path().resource_dir() {
+                debug_log("setup.log", &format!("resource_dir: {:?}\n", resource_dir));
+                app_state.core.set_resource_dir(resource_dir);
+            }
+
             // Clean up any stale Wintun/TUN adapter left behind by a previous crash or sudden reboot
             #[cfg(target_os = "windows")]
             {

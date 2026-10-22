@@ -53,6 +53,7 @@ pub struct CoreProcess {
 pub struct CoreManager {
     process: Arc<Mutex<Option<CoreProcess>>>,
     custom_binary_path: Arc<Mutex<Option<PathBuf>>>,
+    resource_dir: Arc<Mutex<Option<PathBuf>>>,
     cached_version: Arc<Mutex<Option<String>>>,
     recent_output: Arc<Mutex<VecDeque<String>>>,
     last_exit_error: Arc<Mutex<Option<String>>>,
@@ -134,11 +135,71 @@ fn detect_level(line: &str) -> &'static str {
     }
 }
 
+#[cfg(unix)]
+fn ensure_executable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mut perms = metadata.permissions();
+        let mode = perms.mode();
+        if mode & 0o111 == 0 {
+            perms.set_mode(mode | 0o755);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_executable(_path: &std::path::Path) {}
+
+/// Extracts (major, minor, patch) from a version string like "sing-box version 1.14.3" or "v1.14.0".
+pub fn parse_version_tuple(version_str: &str) -> Option<(u64, u64, u64)> {
+    let ver_part = if let Some(idx) = version_str.find("version ") {
+        &version_str[idx + "version ".len()..]
+    } else {
+        version_str
+    };
+
+    let token = ver_part.split_whitespace().next()?;
+    let clean = token.strip_prefix('v').unwrap_or(token);
+    let num_part = clean.split('-').next().unwrap_or(clean);
+    let parts: Vec<&str> = num_part.split('.').collect();
+    if parts.len() >= 2 {
+        let major = parts[0].parse::<u64>().ok()?;
+        let minor = parts[1].parse::<u64>().ok()?;
+        let patch = if parts.len() >= 3 {
+            parts[2].parse::<u64>().unwrap_or(0)
+        } else {
+            0
+        };
+        Some((major, minor, patch))
+    } else {
+        None
+    }
+}
+
+/// Validates that the sing-box binary meets the minimum version requirement (>= 1.14.0).
+pub fn validate_singbox_version(
+    version_str: &str,
+    binary_path: &std::path::Path,
+) -> Result<(), CoreError> {
+    if let Some((major, minor, _)) = parse_version_tuple(version_str) {
+        if major < 1 || (major == 1 && minor < 14) {
+            return Err(CoreError::ValidationFailed(format!(
+                "Incompatible sing-box version detected (found '{}' at {}). RustyBox requires sing-box v1.14.0 or newer. Please use the bundled sing-box or upgrade your system binary.",
+                version_str,
+                binary_path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl CoreManager {
     pub fn new(log_manager: LogManager) -> Self {
         Self {
             process: Arc::new(Mutex::new(None)),
             custom_binary_path: Arc::new(Mutex::new(None)),
+            resource_dir: Arc::new(Mutex::new(None)),
             cached_version: Arc::new(Mutex::new(None)),
             recent_output: Arc::new(Mutex::new(VecDeque::new())),
             last_exit_error: Arc::new(Mutex::new(None)),
@@ -203,6 +264,12 @@ impl CoreManager {
             .and_then(|mut last| last.take())
     }
 
+    pub fn set_resource_dir(&self, dir: PathBuf) {
+        if let Ok(mut lock) = self.resource_dir.lock() {
+            *lock = Some(dir);
+        }
+    }
+
     pub fn set_custom_binary_path(&self, path: Option<PathBuf>) {
         if let Ok(mut lock) = self.custom_binary_path.lock() {
             *lock = path;
@@ -210,9 +277,11 @@ impl CoreManager {
     }
 
     pub fn find_binary(&self) -> Option<PathBuf> {
+        // 1. Explicit custom path set by user in config
         if let Ok(lock) = self.custom_binary_path.lock() {
             if let Some(ref path) = *lock {
                 if path.exists() {
+                    ensure_executable(path);
                     return Some(path.clone());
                 } else {
                     return None;
@@ -226,9 +295,23 @@ impl CoreManager {
             "sing-box"
         };
 
+        // 2. Official Tauri resource directory (bundled with application)
+        if let Ok(lock) = self.resource_dir.lock() {
+            if let Some(ref res_dir) = *lock {
+                let candidates = [res_dir.join("bin").join(exe_name), res_dir.join(exe_name)];
+                for candidate in candidates {
+                    if candidate.exists() {
+                        ensure_executable(&candidate);
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+
+        // 3. Locations relative to current executable (portable, installed deb, AppImage, dev)
         if let Ok(current_exe) = std::env::current_exe() {
             if let Some(parent) = current_exe.parent() {
-                let candidates = [
+                let mut candidates = vec![
                     parent.join(exe_name),
                     parent.join("bin").join(exe_name),
                     parent.join("resources").join(exe_name),
@@ -236,23 +319,89 @@ impl CoreManager {
                     parent.join("_up_").join("bin").join(exe_name),
                     parent.join("_up_").join(exe_name),
                 ];
+
+                // Check grandparent paths (e.g. current_exe = /usr/bin/rustybox -> /usr/lib/rustybox/bin/sing-box)
+                if let Some(grandparent) = parent.parent() {
+                    candidates.push(
+                        grandparent
+                            .join("lib")
+                            .join("rustybox")
+                            .join("bin")
+                            .join(exe_name),
+                    );
+                    candidates.push(
+                        grandparent
+                            .join("lib")
+                            .join("RustyBox")
+                            .join("bin")
+                            .join(exe_name),
+                    );
+                    candidates.push(grandparent.join("lib").join("rustybox").join(exe_name));
+                    candidates.push(grandparent.join("lib").join("RustyBox").join(exe_name));
+                    candidates.push(
+                        grandparent
+                            .join("share")
+                            .join("rustybox")
+                            .join("bin")
+                            .join(exe_name),
+                    );
+                    candidates.push(
+                        grandparent
+                            .join("share")
+                            .join("RustyBox")
+                            .join("bin")
+                            .join(exe_name),
+                    );
+
+                    // Check great-grandparent (e.g. target/debug/rustybox -> <repo>/bin/sing-box)
+                    if let Some(greatgrandparent) = grandparent.parent() {
+                        candidates.push(greatgrandparent.join("bin").join(exe_name));
+                    }
+                }
+
                 for candidate in candidates {
                     if candidate.exists() {
+                        ensure_executable(&candidate);
                         return Some(candidate);
                     }
                 }
             }
         }
 
+        // 4. Linux standard package locations
+        #[cfg(not(target_os = "windows"))]
+        {
+            let linux_system_candidates = [
+                PathBuf::from("/usr/lib/rustybox/bin").join(exe_name),
+                PathBuf::from("/usr/lib/RustyBox/bin").join(exe_name),
+                PathBuf::from("/usr/lib/rustybox").join(exe_name),
+                PathBuf::from("/usr/lib/RustyBox").join(exe_name),
+                PathBuf::from("/usr/share/rustybox/bin").join(exe_name),
+                PathBuf::from("/usr/share/RustyBox/bin").join(exe_name),
+                PathBuf::from("/opt/rustybox/bin").join(exe_name),
+                PathBuf::from("/opt/RustyBox/bin").join(exe_name),
+            ];
+            for candidate in linux_system_candidates {
+                if candidate.exists() {
+                    ensure_executable(&candidate);
+                    return Some(candidate);
+                }
+            }
+        }
+
+        // 5. Working directory / project root candidates (dev mode)
         let local_bin = PathBuf::from("bin").join(exe_name);
         if local_bin.exists() {
+            ensure_executable(&local_bin);
             return Some(local_bin);
         }
         let local_root = PathBuf::from(exe_name);
         if local_root.exists() {
+            ensure_executable(&local_root);
             return Some(local_root);
         }
 
+        // 6. System PATH only as last resort
         if let Ok(path) = which::which(exe_name) {
             return Some(path);
         }
@@ -506,6 +655,9 @@ impl CoreManager {
 
     pub fn validate_config(&self, config: &serde_json::Value) -> Result<(), CoreError> {
         let binary = self.find_binary().ok_or(CoreError::BinaryNotFound)?;
+        let version = self.get_version()?;
+        validate_singbox_version(&version, &binary)?;
+
         let temp_dir = std::env::temp_dir();
         let temp_config = temp_dir.join(format!("rustybox_check_{}.json", uuid::Uuid::new_v4()));
 
@@ -929,5 +1081,54 @@ mod tests {
 
         core_mgr.set_custom_binary_path(Some(PathBuf::from("/nonexistent/sing-box")));
         assert_eq!(core_mgr.find_binary(), None);
+    }
+
+    #[test]
+    fn test_parse_version_tuple() {
+        assert_eq!(
+            parse_version_tuple("sing-box version 1.14.3"),
+            Some((1, 14, 3))
+        );
+        assert_eq!(
+            parse_version_tuple("sing-box version 1.11.0"),
+            Some((1, 11, 0))
+        );
+        assert_eq!(
+            parse_version_tuple("sing-box version 1.15.0-alpha.12"),
+            Some((1, 15, 0))
+        );
+        assert_eq!(parse_version_tuple("v1.14.0"), Some((1, 14, 0)));
+        assert_eq!(parse_version_tuple("invalid"), None);
+    }
+
+    #[test]
+    fn test_validate_singbox_version() {
+        let dummy_path = PathBuf::from("/bin/sing-box");
+        assert!(validate_singbox_version("sing-box version 1.14.3", &dummy_path).is_ok());
+        assert!(validate_singbox_version("sing-box version 1.14.0", &dummy_path).is_ok());
+        assert!(validate_singbox_version("sing-box version 1.15.0", &dummy_path).is_ok());
+
+        let res = validate_singbox_version("sing-box version 1.11.0", &dummy_path);
+        assert!(res.is_err());
+        let err_msg = res.unwrap_err().to_string();
+        assert!(err_msg.contains("Incompatible sing-box version detected"));
+        assert!(err_msg.contains("1.11.0"));
+    }
+
+    #[test]
+    fn test_resource_dir_priority() {
+        let core_mgr = CoreManager::new(LogManager::default());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let exe_name = if cfg!(target_os = "windows") {
+            "sing-box.exe"
+        } else {
+            "sing-box"
+        };
+        let dummy_bin = temp_dir.path().join("bin").join(exe_name);
+        std::fs::create_dir_all(dummy_bin.parent().unwrap()).unwrap();
+        std::fs::write(&dummy_bin, "fake-binary").unwrap();
+
+        core_mgr.set_resource_dir(temp_dir.path().to_path_buf());
+        assert_eq!(core_mgr.find_binary(), Some(dummy_bin));
     }
 }
