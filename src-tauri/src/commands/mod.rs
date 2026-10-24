@@ -145,7 +145,23 @@ pub fn get_config(state: State<'_, AppState>) -> AppConfig {
 }
 
 #[tauri::command]
-pub fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
+pub fn save_config(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    config: AppConfig,
+) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    if config.auto_start {
+        if let Err(e) = autolaunch.enable() {
+            tracing::warn!("Failed to enable autostart: {}", e);
+        }
+    } else {
+        if let Err(e) = autolaunch.disable() {
+            tracing::warn!("Failed to disable autostart: {}", e);
+        }
+    }
+
     state.routing.set_rules(config.rules.clone());
     state
         .routing

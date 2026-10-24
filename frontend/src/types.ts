@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.6";
+export const APP_VERSION = "0.1.7";
 
 export type ConnectionState = "disconnected" | "starting" | "connected" | "stopping" | "error";
 
@@ -83,4 +83,5 @@ export interface AppConfig {
   tun_interface_name: string;
   log_level: string;
   auto_check_updates?: boolean;
+  auto_start?: boolean;
 }

@@ -47,6 +47,8 @@ pub struct AppConfig {
     pub log_level: String,
     #[serde(default = "default_true")]
     pub auto_check_updates: bool,
+    #[serde(default)]
+    pub auto_start: bool,
 }
 
 impl Default for AppConfig {
@@ -68,6 +70,7 @@ impl Default for AppConfig {
             tun_interface_name: "rustybox-tun".to_string(),
             log_level: "info".to_string(),
             auto_check_updates: true,
+            auto_start: false,
         }
     }
 }
@@ -167,12 +170,14 @@ mod tests {
         let mut cfg = mgr.get_config();
         cfg.close_to_tray = false;
         cfg.remote_dns = "8.8.8.8".to_string();
+        cfg.auto_start = true;
         mgr.save_config(cfg.clone()).unwrap();
 
         let mgr2 = ConfigManager::new(path);
         let loaded = mgr2.get_config();
         assert!(!loaded.close_to_tray);
         assert_eq!(loaded.remote_dns, "8.8.8.8");
+        assert!(loaded.auto_start);
     }
 
     #[test]

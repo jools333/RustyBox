@@ -42,6 +42,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .manage(app_state.clone())
         .setup(move |app| {
             debug_log("setup.log", "setup called\n");
@@ -65,12 +69,30 @@ pub fn run() {
                 debug_log("tray_error.log", "Tray setup success!\n");
             }
 
+            let is_autostart = std::env::args().any(|a| a == "--autostart");
+            let cfg = app_state.config.get_config();
+
+            // Sync autostart status with config if needed
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let autolaunch = app.autolaunch();
+                if cfg.auto_start {
+                    if let Ok(false) = autolaunch.is_enabled() {
+                        let _ = autolaunch.enable();
+                    }
+                }
+            }
+
             // Handle window close event (minimize to tray if configured)
             if let Some(main_window) = app.get_webview_window("main") {
                 debug_log("window.log", "main window found\n");
-                let _ = main_window.show();
-                let _ = main_window.unminimize();
-                let _ = main_window.set_focus();
+                if is_autostart && cfg.close_to_tray {
+                    let _ = main_window.hide();
+                } else {
+                    let _ = main_window.show();
+                    let _ = main_window.unminimize();
+                    let _ = main_window.set_focus();
+                }
                 let state_clone = app_state.clone();
                 let win_clone = main_window.clone();
                 main_window.on_window_event(move |event| {

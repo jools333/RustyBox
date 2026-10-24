@@ -2,6 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { check, Update, DownloadEvent } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
+  enable as enableAutostartPlugin,
+  disable as disableAutostartPlugin,
+  isEnabled as isAutostartEnabledPlugin,
+} from "@tauri-apps/plugin-autostart";
+import {
   AppConfig,
   ConnectionStatus,
   CoreStatus,
@@ -110,6 +115,7 @@ export const api = {
         tun_interface_name: "rustybox-tun",
         log_level: "info",
         auto_check_updates: true,
+        auto_start: false,
       };
     }
     return invoke<AppConfig>("get_config");
@@ -157,6 +163,26 @@ export const api = {
   relaunchApp: async (): Promise<void> => {
     if (!isTauri()) return;
     return relaunch();
+  },
+
+  isAutostartEnabled: async (): Promise<boolean> => {
+    if (!isTauri()) return false;
+    try {
+      return await isAutostartEnabledPlugin();
+    } catch (e) {
+      console.warn("isAutostartEnabled check failed:", e);
+      return false;
+    }
+  },
+
+  enableAutostart: async (): Promise<void> => {
+    if (!isTauri()) return;
+    return enableAutostartPlugin();
+  },
+
+  disableAutostart: async (): Promise<void> => {
+    if (!isTauri()) return;
+    return disableAutostartPlugin();
   },
 };
 
