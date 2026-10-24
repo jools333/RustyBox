@@ -22,6 +22,9 @@ fn main() {
         let _ = std::fs::write(crash_dir.join("crash.log"), &msg);
     }));
 
+    // On Windows, prompt for Administrator elevation via UAC on startup (similar to NekoBox)
+    rustybox_lib::platform::ensure_elevation();
+
     let _ = std::fs::write(dir.join("startup.log"), "rustybox started\n");
 
     let log_file = std::fs::OpenOptions::new()

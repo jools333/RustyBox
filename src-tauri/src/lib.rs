@@ -132,6 +132,7 @@ pub fn run() {
             commands::get_diagnostic_report,
             commands::get_core_status,
             commands::check_tun_prerequisites,
+            commands::relaunch_as_admin,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

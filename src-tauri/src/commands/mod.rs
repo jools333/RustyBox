@@ -207,3 +207,8 @@ pub fn check_tun_prerequisites(state: State<'_, AppState>) -> TunPrerequisites {
     let bin = state.core.find_binary();
     state.tun.check_prerequisites(bin.as_deref())
 }
+
+#[tauri::command]
+pub fn relaunch_as_admin() -> Result<(), String> {
+    crate::platform::relaunch_elevated()
+}

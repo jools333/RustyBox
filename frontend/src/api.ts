@@ -184,6 +184,11 @@ export const api = {
     if (!isTauri()) return;
     return disableAutostartPlugin();
   },
+
+  relaunchAsAdmin: async (): Promise<void> => {
+    if (!isTauri()) return;
+    return invoke("relaunch_as_admin");
+  },
 };
 
 export type { Update, DownloadEvent };

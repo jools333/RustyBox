@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Power, Globe, AlertTriangle, Clock, Activity, ShieldAlert } from "lucide-react";
 import { ConnectionStatus, Profile, TunPrerequisites } from "../types";
+import { api } from "../api";
 
 interface ConnectionPanelProps {
   status: ConnectionStatus;
@@ -80,6 +81,12 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 Administrator Rights Required
               </span>
               TUN mode needs administrator or CAP_NET_ADMIN privileges to configure network routes.
+              <button
+                onClick={() => api.relaunchAsAdmin()}
+                className="mt-2 block px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-slate-950 font-semibold rounded-lg text-[11px] transition-colors"
+              >
+                Restart as Administrator
+              </button>
             </div>
           </div>
         )}
