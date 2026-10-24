@@ -20,6 +20,7 @@ impl TunManager {
     pub fn check_prerequisites(&self, singbox_binary_path: Option<&Path>) -> TunPrerequisites {
         let mut details = Vec::new();
         let mut has_driver = false;
+        #[allow(unused_mut)]
         let mut is_elevated = check_elevation();
 
         #[cfg(not(target_os = "windows"))]
