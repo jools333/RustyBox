@@ -19,7 +19,15 @@ import {
 } from "./types";
 
 export const App: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<string>("connect");
+  const [currentTab, setCurrentTab] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const tab = new URLSearchParams(window.location.search).get("tab");
+      if (tab && ["connect", "profiles", "routing", "settings", "logs"].includes(tab)) {
+        return tab;
+      }
+    }
+    return "connect";
+  });
   const [status, setStatus] = useState<ConnectionStatus>({
     state: "disconnected",
     active_profile: null,

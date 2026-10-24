@@ -1,131 +1,155 @@
-# RustyBox — Modern Desktop VPN Client
+# RustyBox — современный десктопный VPN-клиент
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![sing-box](https://img.shields.io/badge/sing--box-v1.14.3-orange.svg)](https://github.com/SagerNet/sing-box)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8D8.svg)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.78%2B-DEA584.svg)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg)](https://react.dev/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/jools333/RustyBox)
 
-RustyBox is a modern, lightweight, cross-platform desktop VPN client built with **Tauri 2**, **Rust**, and **React / TypeScript**. It uses [sing-box](https://github.com/SagerNet/sing-box) (v1.14+) as a dedicated, fully managed network core process to provide high-performance TUN-based proxy routing.
+**RustyBox** — это быстрый, легковесный и безопасный кроссплатформенный VPN-клиент для операционных систем Windows и Linux, построенный на базе фреймворка **Tauri 2**, языка **Rust** и **React 18 / TypeScript**.
+
+В качестве высокопроизводительного сетевого ядра используется **[sing-box](https://github.com/SagerNet/sing-box)** (версии 1.14+), запускаемый в виде изолированного дочернего процесса. RustyBox направляет сетевой трафик через системный виртуальный сетевой адаптер **TUN** (`rustybox-tun` / Wintun), поддерживает современные протоколы **VLESS Reality** и **Shadowsocks 2022**, интеллектуальную маршрутизацию по доменным правилам (прямой трафик / VPN), перехват DNS, автоматический запрос прав администратора (UAC) на Windows и автозапуск вместе с системой.
 
 ---
 
-## Table of Contents
+## 📸 Скриншоты интерфейса
 
-- [Features](#features)
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
+| Главный экран (Подключение) | Правила маршрутизации |
+| :---: | :---: |
+| <img src="docs/screenshots/connection.png" width="380" alt="RustyBox Главный экран" /> | <img src="docs/screenshots/routing.png" width="380" alt="RustyBox Правила маршрутизации" /> |
+
+| Профили подключения | Настройки приложения |
+| :---: | :---: |
+| <img src="docs/screenshots/profiles.png" width="380" alt="RustyBox Профили подключения" /> | <img src="docs/screenshots/settings.png" width="380" alt="RustyBox Настройки" /> |
+
+---
+
+## Оглавление
+
+- [Основные возможности](#основные-возможности)
+- [Скриншоты интерфейса](#-скриншоты-интерфейса)
+- [Поддерживаемые протоколы](#поддерживаемые-протоколы)
+- [Архитектура](#архитектура)
+- [Системные требования](#системные-требования)
   - [Windows](#windows)
   - [Linux](#linux)
-- [Building from Source](#building-from-source)
-  - [Automated Scripts](#automated-scripts)
-  - [Manual Build Steps](#manual-build-steps)
-- [Permissions & Network Drivers](#permissions--network-drivers)
-  - [Windows (`wintun.dll`)](#windows-wintundll)
-  - [Linux (TUN & Capabilities)](#linux-tun--capabilities)
-- [Usage Guide](#usage-guide)
-  - [Importing Profiles](#importing-profiles)
-  - [Connecting & Disconnecting](#connecting--disconnecting)
-  - [Domain-Based Routing](#domain-based-routing)
-  - [Diagnostic Logs & Secret Sanitization](#diagnostic-logs--secret-sanitization)
-- [Testing & Manual Verification](#testing--manual-verification)
-  - [Automated Test Suite](#automated-test-suite)
-  - [Verifying TUN Interface](#verifying-tun-interface)
-  - [Verifying Domain Routing Rules](#verifying-domain-routing-rules)
-  - [Verifying DNS Leak Protection & Hijack](#verifying-dns-leak-protection--hijack)
-- [Agent & Developer Guide (`AGENTS.md`)](#agent--developer-guide-agentsmd)
-- [Licensing & Compliance](#licensing--compliance)
+- [Сборка из исходного кода](#сборка-из-исходного-кода)
+  - [Автоматическая сборка скриптами](#автоматическая-сборка-скриптами)
+  - [Ручная пошаговая сборка](#ручная-пошаговая-сборка)
+- [Сетевые драйверы и права доступа](#сетевые-драйверы-и-права-доступа)
+  - [Windows (Wintun и UAC)](#windows-wintundll-и-права-администратора)
+  - [Linux (TUN и Capabilities)](#linux-tun-и-права-cap_net_admin)
+- [Руководство пользователя](#руководство-пользователя)
+  - [Импорт профилей (VLESS / Shadowsocks)](#импорт-профилей)
+  - [Подключение и отключение](#подключение-и-отключение)
+  - [Настройка правил маршрутизации (Direct / VPN)](#настройка-правил-маршрутизации)
+  - [Автозапуск вместе с системой](#автозапуск-вместе-с-системой)
+  - [Автоматические обновления](#автоматические-обновления)
+  - [Диагностические логи и защита секретов](#диагностические-логи-и-защита-секретов)
+- [Тестирование и проверка](#тестирование-и-проверка)
+  - [Автоматические тесты](#автоматические-тесты)
+  - [Проверка сетевого адаптера TUN](#проверка-сетевого-адаптера-tun)
+  - [Проверка правил маршрутизации](#проверка-правил-маршрутизации)
+  - [Проверка перехвата DNS и защиты от утечек](#проверка-перехвата-dns-и-защиты-от-утечек)
+- [Руководство для разработчиков (AGENTS.md)](#руководство-для-разработчиков-agentsmd)
+- [Лицензирование и соответствие GPLv3](#лицензирование-и-соответствие-gplv3)
 
 ---
 
-## Features
+## Основные возможности
 
-- **Protocols Supported**:
-  - **VLESS**: REALITY with `x25519` key exchange, TLS fallback, UUID authentication, `xtls-rprx-vision` flow.
-  - **Shadowsocks**: Standard AEAD (`aes-128-gcm`, `aes-256-gcm`, `chacha20-ietf-poly1305`) and AEAD 2022 ciphers (`2022-blake3-aes-128-gcm`, `2022-blake3-aes-256-gcm`, `2022-blake3-chacha20-poly1305`).
-- **TUN Virtual Network Interface**:
-  - Full-system traffic capture via `rustybox-tun` virtual adapter (`172.19.0.1/30` IPv4 and `fdfe:dcba:9876::1/126` IPv6).
-  - Explicit driver check for `wintun.dll` on Windows; avoids silent background installations.
-- **Advanced Domain Routing Engine**:
-  - Exact match (`exact`), suffix/wildcard match (`suffix`), and keyword match (`keyword`).
-  - Configurable default action (`DIRECT` or `VPN`).
-  - Automatic `action: "sniff"` rule to extract real domain names from TLS SNI and HTTP Host headers without client certs.
-  - Full DNS interception via `{ "port": 53, "action": "hijack-dns" }` and `{ "protocol": "dns", "action": "hijack-dns" }`.
-  - Automatic proxy server domain bypass rule (`outbound: "direct"`) to completely prevent routing loops.
-- **Robust Subprocess Supervision**:
-  - Fully asynchronous lifecycle (`Disconnected` &rarr; `Starting` &rarr; `Connected` &rarr; `Stopping` &rarr; `Error`).
-  - Rapid click debounce protection (prevents double-spawn races).
-  - Auto-restart recovery (up to 3 restart attempts with exponential backoff).
-  - Clean shutdown guaranteed: SIGINT/CTRL_BREAK followed by SIGKILL, active adapter cleanup.
-- **Security & Privacy First**:
-  - Full secret masking: UUIDs, passwords, REALITY private keys, and base64 credentials are completely scrubbed from memory buffers, UI logs, and exported diagnostic bundles.
-  - Local configuration stored in OS-standard app data directories (`%APPDATA%/rustybox` on Windows, `~/.config/rustybox` on Linux).
-  - Corrupted config auto-recovery: backs up invalid config files and initializes clean defaults without data destruction.
-- **Clean Desktop Integration**:
-  - Native Windows Subsystem: strictly a GUI process (`IMAGE_SUBSYSTEM_WINDOWS_GUI`), completely eliminating console windows on launch.
-  - System tray icon with real-time connection status (`Connected`, `Connecting`, `Disconnected`, `Error`).
-  - "Close to tray" behavior to keep VPN active during multitasking.
+- **Современные протоколы обхода блокировок**:
+  - **VLESS REALITY**: эллиптическая кривая `x25519`, аутентификация по UUID v4, маскировка под популярные TLS-сайты (SNI, Chrome fingerprint) и поток `xtls-rprx-vision`.
+  - **Shadowsocks**: современные шифры AEAD 2022 (`2022-blake3-aes-128-gcm`, `2022-blake3-aes-256-gcm`, `2022-blake3-chacha20-poly1305`), а также классические шифры AEAD (`aes-128-gcm`, `aes-256-gcm`, `chacha20-ietf-poly1305`).
+- **Полноценный виртуальный сетевой адаптер TUN**:
+  - Полный перехват трафика на уровне сетевого стека ОС через виртуальный адаптер `rustybox-tun` (`172.19.0.1/30` IPv4 и `fdfe:dcba:9876::1/126` IPv6).
+  - На Windows используется высокоскоростной драйвер **Wintun** (v0.14+). Программа проверяет наличие драйвера и прав перед запуском ядра.
+- **Интеллектуальная маршрутизация по доменам (Routing Engine)**:
+  - Режимы работы: **Маршрутизация по правилам (Domain Rules)**, **Полный VPN (Global VPN)** или **Прямой трафик (Global Direct)**.
+  - Настройка действия по умолчанию (Fallback Action): направлять несовпадающие сайты через `VPN` или напрямую `DIRECT`.
+  - Поддержка точного совпадения (`exact`), суффиксов и поддоменов (`suffix`, `*.example.com`) и ключевых слов (`keyword`).
+  - Автоматическое распознавание реальных доменов через protocol sniffing (`action: "sniff"` для TLS SNI и HTTP Host).
+  - Тотальный перехват и защита от утечек DNS через `{ "port": 53, "action": "hijack-dns" }` и `{ "protocol": "dns", "action": "hijack-dns" }`.
+  - Автоматическое прямое исключение для адреса самого прокси-сервера (`outbound: "direct"`), гарантирующее отсутствие циклических маршрутов.
+- **Интеграция с операционной системой**:
+  - **Автозапуск с системой**: возможность запуска RustyBox в фоне при старте Windows/Linux через настройки приложения.
+  - **UAC-запрос прав администратора**: при запуске на Windows программа проверяет привилегии и, подобно NekoBox, запрашивает повышение прав через стандартный диалог UAC, а также предоставляет кнопку перезапуска с правами администратора.
+  - **Сворачивание в системный трей (Close to Tray)**: работа в фоновом режиме без загромождения панели задач, индикация статуса подключения в иконке трея.
+  - **Чистый GUI-процесс**: на Windows сборка компилируется с флагом `IMAGE_SUBSYSTEM_WINDOWS_GUI`, исключая появление паразитных черных консольных окон.
+  - **Встроенные обновления**: проверка и установка релизов с GitHub Releases в один клик с проверкой криптографической подписи Minisign / Ed25519.
+- **Безопасность и конфиденциальность**:
+  - **Маскирование секретов**: все UUID, пароли, приватные ключи REALITY и base64-токены автоматически маскируются (`[REDACTED_UUID]`, `[REDACTED_SECRET]`, `[REDACTED_KEY]`) в оперативной памяти, в отображаемом журнале логов и при экспорте диагностических отчетов.
+  - **Надежное хранение конфигурации**: пользовательские настройки и профили сохраняются в системной папке приложения (`%APPDATA%/rustybox` на Windows, `~/.config/rustybox` на Linux) с автоматическим резервным копированием при повреждении файлов (`config.json.corrupted.<timestamp>`).
 
 ---
 
-## Architecture
+## Архитектура
 
-RustyBox is designed with a strict separation of concerns:
+RustyBox спроектирован по модульному принципу с четким разделением уровней:
 
 ```mermaid
 graph TD
-    UI[Frontend: React + Vite + Tailwind CSS]
-    IPC[Tauri IPC Bridge]
-    Backend[Rust Application Core]
-    ConfigMgr[Config & Profile Manager]
-    RoutingMgr[Routing Manager]
-    LogMgr[Log Sanitizer & Ring Buffer]
-    CoreMgr[sing-box Process Supervisor]
-    SingBox[sing-box Subprocess v1.14]
-    TunDev[TUN Adapter: wintun / dev-net-tun]
-    RemoteServer[Remote Proxy Server]
+    UI["Интерфейс: React 18 + Vite + Tailwind CSS"]
+    IPC["Шина Tauri IPC"]
+    Backend["Rust Application Core"]
+    ConfigMgr["Менеджер конфигураций и профилей"]
+    RoutingMgr["Менеджер правил маршрутизации"]
+    LogMgr["Кольцевой буфер и маскирование логов"]
+    CoreMgr["Супервизор процесса sing-box"]
+    SingBox["Процесс ядра sing-box v1.14"]
+    TunDev["Сетевой адаптер TUN: wintun / dev-net-tun"]
+    RemoteServer["Удаленный сервер VPN"]
 
-    UI <-->|Tauri IPC Commands & Events| IPC
+    UI <-->|Команды и события Tauri IPC| IPC
     IPC <--> Backend
     Backend --> ConfigMgr
     Backend --> RoutingMgr
     Backend --> LogMgr
     Backend --> CoreMgr
 
-    CoreMgr -->|Generates Config JSON| SingBox
-    CoreMgr -->|Monitors stdout/stderr| LogMgr
-    SingBox -->|Controls| TunDev
-    SingBox -->|Proxies Outbound Traffic| RemoteServer
+    CoreMgr -->|Генерация конфигурации JSON| SingBox
+    CoreMgr -->|Перехват stdout/stderr| LogMgr
+    SingBox -->|Управление интерфейсом| TunDev
+    SingBox -->|Шифрованный туннель| RemoteServer
 ```
 
-1. **Frontend (React / TypeScript)**:
-   - Presentation layer built with Tailwind CSS. Runs in WebView2 (Windows) or WebKitGTK (Linux).
-   - Polls or listens to connection state, displays live log streams, and manages profile/routing forms.
+1. **Frontend (React 18 / TypeScript)**:
+   - Презентационный слой в WebView2 (Windows) или WebKitGTK (Linux).
+   - Интуитивный интерфейс с темной темой, отображением аптайма, списком профилей с замером задержки, редактором правил маршрутизации, журналом логов и настройками.
 2. **Backend (Rust & Tauri 2)**:
-   - Owns application state (`AppState`) protected by asynchronous `tokio::sync::Mutex` locks.
-   - Parses `vless://` and `ss://` URI formats.
-   - Evaluates routing rules and generates valid `sing-box` 1.14 configurations on the fly.
-   - Supervises the `sing-box` child process with graceful termination guarantees.
+   - Управление состоянием (`AppState`), защищенное асинхронными мьютексами `tokio::sync::Mutex`.
+   - Парсинг URI-ссылок `vless://` и `ss://`.
+   - Генерация валидной конфигурации `sing-box` 1.14 на лету с типизированными DNS-серверами и правилами маршрутов.
+   - Надежный супервизор процесса ядра с автоматическим корректным завершением (SIGINT -> SIGKILL) и очисткой виртуального адаптера.
 3. **Core (sing-box 1.14)**:
-   - Runs as an unprivileged or elevated auxiliary process.
-   - Captures system IP packets via TUN, terminates DNS queries safely, sniffs SNI domains, and routes packets to the target outbound.
+   - Автономный бинарный файл, запускаемый клиентом с сетевыми привилегиями.
+   - Захватывает IP-пакеты системы, перехватывает DNS-запросы и туннелирует трафик в выбранный протокол.
 
 ---
 
-## Prerequisites
+## Поддерживаемые протоколы
+
+| Протокол | Шифрование / Транспорт | Аутентификация | Особенности |
+|---|---|---|---|
+| **VLESS** | REALITY (`x25519`), TLS, TCP | UUID v4 | Поток `xtls-rprx-vision`, маскировка под сторонние домены (SNI), Chrome fingerprint |
+| **Shadowsocks 2022** | `2022-blake3-aes-128-gcm`<br>`2022-blake3-aes-256-gcm`<br>`2022-blake3-chacha20-poly1305` | Предопределенный ключ (PSK) | Высокая устойчивость к DPI, сниженные накладные расходы |
+| **Shadowsocks AEAD** | `aes-128-gcm`, `aes-256-gcm`, `chacha20-ietf-poly1305` | Пароль | Классический стандарт SIP002 |
+
+---
+
+## Системные требования
 
 ### Windows
-- **Operating System**: Windows 10/11 (64-bit).
-- **Rust Toolchain**: `stable-x86_64-pc-windows-msvc` or `stable-x86_64-pc-windows-gnu` (Rust 1.78+).
-- **WebView2 Runtime**: Installed by default on Windows 10/11.
-- **Node.js**: Node 18+ and npm for frontend assets.
-- **Binaries**:
-  - `bin/sing-box.exe` (sing-box 1.14.3+)
-  - `bin/wintun.dll` (Wintun TUN driver for Windows, v0.14+)
+- **Операционная система**: Windows 10 или Windows 11 (64-бит).
+- **Среда выполнения**: Microsoft Edge WebView2 Runtime (установлен по умолчанию в современных версиях Windows).
+- **Драйвер TUN**: `wintun.dll` (v0.14+, размещается в папке `bin/` или рядом с исполняемым файлом).
+- **Права администратора**: требуются для создания виртуального адаптера Wintun и настройки системных маршрутов (клиент запрашивает их автоматически через UAC).
 
 ### Linux
-- **Operating System**: Ubuntu 22.04+, Debian 12+, Fedora 38+, Arch Linux, etc.
-- **Dependencies**:
+- **Операционная система**: Ubuntu 22.04+, Debian 12+, Fedora 38+, Arch Linux и др.
+- **Сетевые возможности**: поддержка ядра Linux для модуля `tun` (`/dev/net/tun`) и права `CAP_NET_ADMIN` для сетевого ядра `sing-box`.
+- **Системные пакеты для сборки**:
   ```bash
   sudo apt-get update && sudo apt-get install -y \
     libwebkit2gtk-4.1-dev \
@@ -138,215 +162,223 @@ graph TD
     libayatana-appindicator3-dev \
     librsvg2-dev
   ```
-- **Node.js**: Node 18+ and npm.
-- **Binaries**:
-  - `bin/sing-box` (compiled with TUN and VLESS/REALITY support)
 
 ---
 
-## Building from Source
+## Сборка из исходного кода
 
-### Automated Scripts
+### Автоматическая сборка скриптами
 
-Pre-configured scripts automate downloading dependencies and compiling the project:
+В репозитории подготовлены скрипты для автоматической загрузки ядра `sing-box`, драйвера Wintun и компиляции проекта:
 
-#### Windows
+#### Windows (PowerShell)
 ```powershell
-# 1. Download sing-box and wintun.dll into bin/
+# 1. Скачивание sing-box.exe и wintun.dll в директорию bin/
 .\scripts\download-singbox.ps1
 
-# 2. Build debug binary
+# 2. Сборка debug-версии
 .\scripts\build-windows.ps1 -Configuration debug
 
-# 3. Build optimized release binary
+# 3. Сборка релизной оптимизированной версии
 .\scripts\build-windows.ps1 -Configuration release
 ```
 
-#### Linux
+#### Linux (Bash)
 ```bash
-# 1. Download sing-box into bin/
+# 1. Загрузка sing-box в bin/
 chmod +x scripts/*.sh
 ./scripts/download-singbox.sh
 
-# 2. Build debug binary
+# 2. Сборка debug-бинарника
 ./scripts/build-linux.sh debug
 
-# 3. Build optimized release binary
+# 3. Сборка релизного бинарника
 ./scripts/build-linux.sh release
 ```
 
-### Manual Build Steps
+### Ручная пошаговая сборка
 
-If you prefer building each component manually:
+Если вы собираете проект вручную:
 
-1. **Build Frontend**:
+1. **Сборка фронтенда**:
    ```bash
    cd frontend
    npm install
    npm run build
    cd ..
    ```
-2. **Build Rust / Tauri**:
+2. **Сборка Rust / Tauri бэкенда**:
    ```bash
    cargo build --package rustybox --bin rustybox
    ```
-   Or for production release:
+   Для релизной сборки:
    ```bash
    cargo build --release --package rustybox --bin rustybox
    ```
 
-Binary output will be available at `target/debug/rustybox` (or `target/release/rustybox`).
+Скомпилированный файл будет находиться по пути `target/debug/rustybox` (или `target/release/rustybox`). Не забудьте поместить `sing-box` (и `wintun.dll` на Windows) рядом с бинарником или в папку `bin/`.
 
 ---
 
-## Permissions & Network Drivers
+## Сетевые драйверы и права доступа
 
-TUN-based VPN clients require elevated capabilities to create network adapters and modify routing tables.
+Для работы системного виртуального адаптера TUN требуются сетевые привилегии уровня операционной системы:
 
-### Windows (`wintun.dll`)
-1. Place `wintun.dll` in `bin/wintun.dll` (or alongside `rustybox.exe`).
-2. Run `rustybox.exe` as **Administrator** ("Run as administrator").
-   - *Driver Safety*: RustyBox checks for the presence of `wintun.dll` and elevation before attempting to connect. If missing or unelevated, clear diagnostic instructions are presented to the user instead of silent failures.
+### Windows (`wintun.dll` и права администратора)
+1. RustyBox использует драйвер Wintun. Файл `wintun.dll` должен находиться рядом с программой или в папке `bin/wintun.dll`.
+2. При запуске RustyBox автоматически проверяет наличие прав администратора. Если программа запущена от имени обычного пользователя, на главном экране отображается предупреждение с кнопкой **«Restart as Administrator»**, либо вызывается стандартный системный диалог UAC.
 
-### Linux (TUN & Capabilities)
-TUN creation on Linux requires access to `/dev/net/tun` and `CAP_NET_ADMIN`.
-
-To run without full `sudo` root for the desktop UI:
+### Linux (TUN и права `CAP_NET_ADMIN`)
+Для работы TUN в Linux без постоянного использования `sudo` для всего графического интерфейса достаточно выдать сетевые возможности ядру `sing-box`:
 ```bash
-# Grant CAP_NET_ADMIN and CAP_NET_BIND_SERVICE to sing-box core
+# Выдача сетевых capabilities бинарнику ядра
 sudo setcap cap_net_admin,cap_net_bind_service=+ep bin/sing-box
 ```
-Or allow your user access to `/dev/net/tun`:
+Или предоставить права на устройство `/dev/net/tun`:
 ```bash
 sudo chmod 666 /dev/net/tun
 ```
 
 ---
 
-## Usage Guide
+## Руководство пользователя
 
-### Importing Profiles
+### Импорт профилей
 
-RustyBox supports one-click import from clipboard:
-
-1. Copy your proxy URI:
+RustyBox поддерживает быстрый импорт конфигураций из буфера обмена:
+1. Скопируйте ссылку конфигурации вашего сервера:
    - **VLESS Reality**:
      ```text
-     vless://uuid-goes-here@server.com:443?security=reality&sni=target.com&fp=chrome&pbk=PublicKey1234567890&sid=abcdef&flow=xtls-rprx-vision&type=tcp#MyRealityServer
+     vless://uuid-goes-here@server.com:443?security=reality&sni=target.com&fp=chrome&pbk=PublicKey1234567890&sid=abcdef&flow=xtls-rprx-vision&type=tcp#MyServer
      ```
    - **Shadowsocks**:
      ```text
-     ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@server.com:8388#MySSServer
+     ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@server.com:8388#MyServer
      ```
-2. Open RustyBox &rarr; Go to **Profiles** &rarr; Click **"Import from Clipboard"**.
-3. Or click **"Add Profile"** to configure parameters manually.
+2. Откройте вкладку **Profiles** в RustyBox.
+3. Нажмите **«Import URI»** (или **«Import from Clipboard»**).
+4. Также доступно ручное добавление через кнопку **«Add Manual»**.
 
-### Connecting & Disconnecting
+### Подключение и отключение
 
-- On the **Connection** tab, select your profile from the dropdown.
-- Click the large toggle button to connect.
-- The UI transitions through `Starting` &rarr; `Connected`.
-- A session duration timer displays live uptime.
-- Click the toggle again to disconnect gracefully.
+- На вкладке **Status** выберите нужный профиль из выпадающего списка.
+- Нажмите центральную кнопку питания для подключения.
+- Статус изменится: `Starting` &rarr; `Connected`.
+- Таймер начнет отсчет времени активной сессии.
+- Для отключения нажмите кнопку повторно.
 
-### Domain-Based Routing
+### Настройка правил маршрутизации
 
-Navigate to the **Routing** tab to configure domain policies:
-- **Default Action**: Choose whether unlisted domains go `DIRECT` (bypass VPN) or `VPN` (proxy everything).
-- **Rule Management**:
-  - Add rules with types:
-    - `Exact`: Matches `example.com`.
-    - `Suffix`: Matches `.example.com` and all subdomains (e.g., `api.example.com`).
-    - `Keyword`: Matches any domain containing the keyword (e.g., `google`).
-  - Toggle rule action between `DIRECT` and `VPN`.
-- **Import / Export**: Export your rule configuration as a JSON file to share across devices.
+На вкладке **Routing** можно гибко настраивать политики маршрутизации трафика:
+- **Режимы маршрутизации**:
+  - `Domain Rules`: выборочное проксирование на основе списка правил.
+  - `Global VPN`: весь системный трафик идет через VPN.
+  - `Global Direct`: весь трафик идет напрямую в обход VPN.
+- **Действие по умолчанию (Fallback Default Action)**:
+  - `VPN (Proxy)`: если домен не найден в правилах, он идет через VPN.
+  - `DIRECT`: если домен не найден в правилах, он идет напрямую от вашего провайдера.
+- **Типы правил**:
+  - Доменные шаблоны: `*.ru`, `yandex.ru`, `youtube.com`, `instagram.com` и т.д.
+  - Действие для правила: `DIRECT` (в обход VPN) или `VPN` (через прокси-сервер).
+  - Быстрое включение/отключение любого правила чекбоксом или удаление.
+- **Импорт / Экспорт**: сохраняйте и загружайте списки правил в формате JSON.
 
-### Diagnostic Logs & Secret Sanitization
+### Автозапуск вместе с системой
 
-Navigate to the **Logs** tab:
-- Live view of backend activity and `sing-box` stderr/stdout.
-- Filter by level (`DEBUG`, `INFO`, `WARN`, `ERROR`).
-- Click **"Copy Diagnostic Report"** to copy a sanitized log bundle.
-- **Privacy Guarantee**: All UUIDs, passwords, REALITY private keys, and base64 hashes are automatically replaced with `[REDACTED_UUID]`, `[REDACTED_SECRET]`, or `[REDACTED_KEY]` before rendering or export.
+На вкладке **Settings** доступен переключатель **«Start with System»**:
+- При включении RustyBox будет автоматически запускаться при загрузке операционной системы.
+- Включение опции **«Close to System Tray»** позволяет при закрытии окна оставлять соединение активным в фоновом режиме в системном трее.
+
+### Автоматические обновления
+
+- RustyBox проверяет наличие новых версий на GitHub Releases при запуске.
+- Проверить обновления вручную можно в любое время на вкладке **Settings** кнопкой **«Check for Updates»**.
+- Обновления защищены цифровой криптографической подписью Minisign. Перед применением обновления клиент безопасно останавливает активную сессию VPN, освобождая драйверы.
+
+### Диагностические логи и защита секретов
+
+На вкладке **Logs**:
+- Живой поток системных событий RustyBox и ядра `sing-box`.
+- Кнопка **«Copy Diagnostic Report»** копирует полный отчет о системе и подключении для отправки в поддержку.
+- **Гарантия конфиденциальности**: пароли, приватные ключи REALITY, UUID и токены маскируются в логах и отчетах маской `[REDACTED]`.
 
 ---
 
-## Testing & Manual Verification
+## Тестирование и проверка
 
-### Automated Test Suite
+### Автоматические тесты
 
-RustyBox includes a comprehensive unit and integration test suite covering all 12 core test scenarios:
-
+В репозитории реализован полный набор юнит- и интеграционных тестов:
 ```bash
-# Run headless unit and integration tests (recommended for rapid verification)
 cargo test --no-default-features
 ```
 
-Test scenarios covered:
-1. `test_scenario_01_parse_valid_vless_uri` (VLESS Reality URI parser)
-2. `test_scenario_02_parse_valid_shadowsocks_uri` (Shadowsocks SIP002 & legacy)
-3. `test_scenario_03_reject_invalid_uris` (rejection of malformed URIs, ports, UUIDs)
-4. `test_scenario_04_save_and_load_profiles` (JSON serialization & persistence)
-5. `test_scenario_05_add_edit_delete_rules` (routing rules CRUD)
-6. `test_scenario_06_rule_priority_and_order` (rule reordering and priority evaluation)
-7. `test_scenario_07_singbox_config_generation` (sing-box 1.14 typed DNS & route validation)
-8. `test_scenario_08_secret_masking` (credential redaction in logs and bundles)
-9. `test_scenario_09_repeated_connect_click` (debounce protection against double-spawn)
-10. `test_scenario_10_state_transitions` (Disconnected -> Starting -> Connected -> Stopping)
-11. `test_scenario_11_failed_core_launch` (graceful failure to Error state)
-12. `test_scenario_12_stop_core_when_not_running` (safe idempotent Stop calls)
+Сценарии тестирования включают:
+1. `test_scenario_01_parse_valid_vless_uri` — парсинг VLESS Reality URI.
+2. `test_scenario_02_parse_valid_shadowsocks_uri` — парсинг Shadowsocks (SIP002 и AEAD 2022).
+3. `test_scenario_03_reject_invalid_uris` — отклонение некорректных URI и невалидных UUID.
+4. `test_scenario_04_save_and_load_profiles` — сериализация и сохранение профилей.
+5. `test_scenario_05_add_edit_delete_rules` — CRUD-операции правил маршрутизации.
+6. `test_scenario_06_rule_priority_and_order` — приоритет и сортировка правил.
+7. `test_scenario_07_singbox_config_generation` — генерация валидного JSON sing-box 1.14 с типизированными DNS.
+8. `test_scenario_08_secret_masking` — маскирование секретов и паролей в логах.
+9. `test_scenario_09_repeated_connect_click` — защита от дребезга и повторных кликов подключения.
+10. `test_scenario_10_state_transitions` — жизненный цикл состояний подключения.
+11. `test_scenario_11_failed_core_launch` — корректная обработка ошибок запуска ядра.
+12. `test_scenario_12_stop_core_when_not_running` — идемпотентная остановка неактивного ядра.
 
-### Verifying TUN Interface
+### Проверка сетевого адаптера TUN
 
-1. Start connection in RustyBox (running as Administrator on Windows or with root capabilities on Linux).
-2. In PowerShell (Administrator):
-   ```powershell
-   Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*wintun*" }
-   ```
-   You should see `rustybox-tun` in `Up` status.
-3. Check routing table:
-   ```powershell
-   Get-NetRoute -InterfaceAlias "rustybox-tun"
-   ```
+После подключения к VPN на Windows в PowerShell (Администратор):
+```powershell
+Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*wintun*" }
+```
+Адаптер `rustybox-tun` должен иметь статус `Up`.
 
-### Verifying Domain Routing Rules
+Таблица маршрутов:
+```powershell
+Get-NetRoute -InterfaceAlias "rustybox-tun"
+```
 
-1. Add a rule: `suffix: "ifconfig.me"` &rarr; `VPN`.
-2. Add a rule: `suffix: "icanhazip.com"` &rarr; `DIRECT`.
-3. Test from your terminal:
+### Проверка правил маршрутизации
+
+1. Создайте правило: `suffix: "ifconfig.me"` &rarr; `VPN`.
+2. Создайте правило: `suffix: "icanhazip.com"` &rarr; `DIRECT`.
+3. Выполните проверку в терминале:
    ```bash
-   curl https://ifconfig.me   # Outputs Proxy Server IP
-   curl https://icanhazip.com # Outputs Your Real ISP IP
+   curl https://ifconfig.me   # Возвращает IP-адрес прокси-сервера
+   curl https://icanhazip.com # Возвращает ваш реальный IP-адрес провайдера
    ```
 
-### Verifying DNS Leak Protection & Hijack
+### Проверка перехвата DNS и защиты от утечек
 
-RustyBox intercepts all DNS requests via `{ "port": 53, "action": "hijack-dns" }` and `{ "protocol": "dns", "action": "hijack-dns" }`:
+RustyBox перехватывает все DNS-запросы на порту 53:
 ```powershell
 nslookup whoami.akamai.net 172.19.0.2
 ```
-Verify that DNS queries are handled through the encrypted proxy tunnel and no unencrypted UDP DNS leaks to your local ISP.
+Запросы резолвятся через безопасный зашифрованный туннель, полностью предотвращая утечки DNS вашему интернет-провайдеру.
 
 ---
 
-## Agent & Developer Guide (`AGENTS.md`)
+## Руководство для разработчиков (`AGENTS.md`)
 
-For artificial intelligence coding assistants and developers contributing to this repository, a comprehensive operational guide is available in [AGENTS.md](AGENTS.md). It outlines:
-- Environment and toolchain requirements (Windows MinGW/GNU toolchain paths, incremental compilation flags).
-- sing-box 1.14 syntax and configuration requirements.
-- Step-by-step instructions for running tests, formatting, and compiling.
-- Troubleshooting common Windows desktop, Job Object, and TUN driver issues.
+Для разработчиков и AI-ассистентов в репозитории предусмотрен подробный технический регламент: **[AGENTS.md](AGENTS.md)**.
+В нем описаны:
+- Особенности тулчейна Windows MinGW/GNU и переменные окружения.
+- Правила синтаксиса конфигурации `sing-box` 1.14 (типы DNS-серверов, правила без циклов).
+- Команды линтинга (`cargo clippy -D warnings`), форматирования (`cargo fmt`) и сборки.
+- Правила безопасности и изоляции ядра.
 
 ---
 
-## Licensing & Compliance
+## Лицензирование и соответствие GPLv3
 
-### RustyBox
-RustyBox application source code, UI, and Rust backend are released under the [MIT License](LICENSE).
+### Лицензия RustyBox
+Исходный код клиентского приложения RustyBox, пользовательский интерфейс и Rust-бэкенд распространяются под свободной лицензией **[MIT](LICENSE)**.
 
-### sing-box Compliance Notice
-RustyBox executes [sing-box](https://github.com/SagerNet/sing-box) as an external, independent subprocess.
-- `sing-box` is licensed under the **GNU General Public License v3.0 (GPLv3)**.
-- RustyBox does **not** link against sing-box as a static or dynamic library. Communication is strictly through command-line invocations, JSON configuration files, and standard process I/O.
-- The sing-box source code is available at [https://github.com/SagerNet/sing-box](https://github.com/SagerNet/sing-box).
-- When distributing pre-packaged releases containing the `sing-box` binary, a copy of the GPLv3 license and link to the corresponding sing-box source release is included in accordance with GPLv3 Section 6.
+### Соответствие лицензии sing-box (GPLv3)
+RustyBox использует ядро **[sing-box](https://github.com/SagerNet/sing-box)** в качестве внешнего независимого подпроцесса.
+- `sing-box` лицензирован под **GNU General Public License v3.0 (GPLv3)**.
+- RustyBox **не** линкуется с sing-box в виде статической или динамической библиотеки. Взаимодействие осуществляется исключительно через аргументы командной строки, JSON-конфигурационные файлы и стандартные потоки ввода-вывода (IPC/Pipes).
+- Исходный код sing-box доступен в официальном репозитории: [https://github.com/SagerNet/sing-box](https://github.com/SagerNet/sing-box).
+- При распространении бинарных сборок RustyBox, содержащих исполняемый файл sing-box, текст лицензии GPLv3 и ссылки на исходный код sing-box прилагаются в полном соответствии с разделом 6 лицензии GPLv3.
