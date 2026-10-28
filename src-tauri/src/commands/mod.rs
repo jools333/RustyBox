@@ -150,16 +150,8 @@ pub fn save_config(
     state: State<'_, AppState>,
     config: AppConfig,
 ) -> Result<(), String> {
-    use tauri_plugin_autostart::ManagerExt;
-    let autolaunch = app.autolaunch();
-    if config.auto_start {
-        if let Err(e) = autolaunch.enable() {
-            tracing::warn!("Failed to enable autostart: {}", e);
-        }
-    } else {
-        if let Err(e) = autolaunch.disable() {
-            tracing::warn!("Failed to disable autostart: {}", e);
-        }
+    if let Err(e) = crate::platform::autostart::set_enabled(&app, config.auto_start) {
+        tracing::warn!("Failed to set autostart: {}", e);
     }
 
     state.routing.set_rules(config.rules.clone());
@@ -211,4 +203,19 @@ pub fn check_tun_prerequisites(state: State<'_, AppState>) -> TunPrerequisites {
 #[tauri::command]
 pub fn relaunch_as_admin() -> Result<(), String> {
     crate::platform::relaunch_elevated()
+}
+
+#[tauri::command]
+pub fn enable_autostart(app: tauri::AppHandle) -> Result<(), String> {
+    crate::platform::autostart::set_enabled(&app, true)
+}
+
+#[tauri::command]
+pub fn disable_autostart(app: tauri::AppHandle) -> Result<(), String> {
+    crate::platform::autostart::set_enabled(&app, false)
+}
+
+#[tauri::command]
+pub fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    crate::platform::autostart::is_enabled(&app)
 }

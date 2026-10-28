@@ -1,3 +1,5 @@
+pub mod autostart;
+
 pub fn get_os_info() -> String {
     #[cfg(target_os = "windows")]
     {

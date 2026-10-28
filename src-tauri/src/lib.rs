@@ -73,15 +73,7 @@ pub fn run() {
             let cfg = app_state.config.get_config();
 
             // Sync autostart status with config if needed
-            {
-                use tauri_plugin_autostart::ManagerExt;
-                let autolaunch = app.autolaunch();
-                if cfg.auto_start {
-                    if let Ok(false) = autolaunch.is_enabled() {
-                        let _ = autolaunch.enable();
-                    }
-                }
-            }
+            let _ = platform::autostart::sync_with_config(app.handle(), cfg.auto_start);
 
             // Handle window close event (minimize to tray if configured)
             if let Some(main_window) = app.get_webview_window("main") {
@@ -133,6 +125,9 @@ pub fn run() {
             commands::get_core_status,
             commands::check_tun_prerequisites,
             commands::relaunch_as_admin,
+            commands::enable_autostart,
+            commands::disable_autostart,
+            commands::is_autostart_enabled,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

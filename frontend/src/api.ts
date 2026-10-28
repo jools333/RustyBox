@@ -2,11 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { check, Update, DownloadEvent } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
-  enable as enableAutostartPlugin,
-  disable as disableAutostartPlugin,
-  isEnabled as isAutostartEnabledPlugin,
-} from "@tauri-apps/plugin-autostart";
-import {
   AppConfig,
   ConnectionStatus,
   CoreStatus,
@@ -277,7 +272,7 @@ export const api = {
   isAutostartEnabled: async (): Promise<boolean> => {
     if (!isTauri()) return true;
     try {
-      return await isAutostartEnabledPlugin();
+      return await invoke<boolean>("is_autostart_enabled");
     } catch (e) {
       console.warn("isAutostartEnabled check failed:", e);
       return false;
@@ -286,12 +281,12 @@ export const api = {
 
   enableAutostart: async (): Promise<void> => {
     if (!isTauri()) return;
-    return enableAutostartPlugin();
+    return invoke("enable_autostart");
   },
 
   disableAutostart: async (): Promise<void> => {
     if (!isTauri()) return;
-    return disableAutostartPlugin();
+    return invoke("disable_autostart");
   },
 
   relaunchAsAdmin: async (): Promise<void> => {
