@@ -316,9 +316,10 @@ mod tests {
         assert_eq!(bytes[1], 0xFE);
 
         // Decode UTF-16LE back to string to verify contents
-        let u16_chars: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        let (chunks, _) = bytes[2..].as_chunks::<2>();
+        let u16_chars: Vec<u16> = chunks
+            .iter()
+            .map(|chunk| u16::from_le_bytes(*chunk))
             .collect();
         let decoded = String::from_utf16(&u16_chars).expect("valid utf16");
 
