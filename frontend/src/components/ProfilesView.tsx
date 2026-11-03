@@ -1,6 +1,7 @@
-import React, { useState } from "react";
-import { Plus, Trash2, Clipboard, Check, Server } from "lucide-react";
-import { Profile, VlessConfig, ShadowsocksConfig } from "../types";
+import React, { useState, useRef } from "react";
+import { Plus, Trash2, Clipboard, Check, Server, FileText, Lock } from "lucide-react";
+import { Profile, VlessConfig, ShadowsocksConfig, OpenvpnConfig } from "../types";
+import { api } from "../api";
 
 interface ProfilesViewProps {
   profiles: Profile[];
@@ -9,6 +10,7 @@ interface ProfilesViewProps {
   onImportUri: (uri: string) => Promise<void>;
   onAdd: (profile: Profile) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onReload?: () => Promise<void>;
 }
 
 export const ProfilesView: React.FC<ProfilesViewProps> = ({
@@ -18,10 +20,20 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   onImportUri,
   onAdd,
   onDelete,
+  onReload,
 }) => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [uriInput, setUriInput] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
+
+  // OpenVPN file input & credentials modal
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showOvpnModal, setShowOvpnModal] = useState(false);
+  const [ovpnFilePath, setOvpnFilePath] = useState("");
+  const [ovpnContent, setOvpnContent] = useState("");
+  const [ovpnUsername, setOvpnUsername] = useState("");
+  const [ovpnPassword, setOvpnPassword] = useState("");
+  const [ovpnError, setOvpnError] = useState<string | null>(null);
 
   // Manual Add state
   const [showManualModal, setShowManualModal] = useState(false);
@@ -43,6 +55,72 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
       setShowImportModal(false);
     } catch (e: any) {
       setImportError(e?.message || String(e));
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input so re-selecting the same file fires onChange again
+    e.target.value = "";
+
+    const nativePath = (file as any).path as string | undefined;
+
+    if (nativePath) {
+      try {
+        setOvpnError(null);
+        await api.importOvpnFile(nativePath);
+        if (onReload) await onReload();
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        // If credentials are required or error occurred, open modal for username/password
+        setOvpnFilePath(nativePath);
+        setOvpnContent("");
+        setOvpnError(msg);
+        setShowOvpnModal(true);
+      }
+    } else {
+      // Browser fallback (reading text)
+      try {
+        const text = await file.text();
+        setOvpnFilePath("");
+        setOvpnContent(text);
+        setOvpnError(null);
+        await api.importOvpnContent(text, file.name.replace(/\.ovpn$/i, ""));
+        if (onReload) await onReload();
+      } catch (err: any) {
+        setOvpnError(err?.message || String(err));
+        setShowOvpnModal(true);
+      }
+    }
+  };
+
+  const handleOvpnSubmit = async () => {
+    try {
+      setOvpnError(null);
+      if (ovpnFilePath) {
+        await api.importOvpnFile(
+          ovpnFilePath,
+          ovpnUsername.trim() || undefined,
+          ovpnPassword || undefined
+        );
+      } else if (ovpnContent) {
+        await api.importOvpnContent(
+          ovpnContent,
+          undefined,
+          ovpnUsername.trim() || undefined,
+          ovpnPassword || undefined
+        );
+      }
+      setShowOvpnModal(false);
+      setOvpnFilePath("");
+      setOvpnContent("");
+      setOvpnUsername("");
+      setOvpnPassword("");
+      if (onReload) await onReload();
+    } catch (err: any) {
+      setOvpnError(err?.message || String(err));
     }
   };
 
@@ -100,8 +178,24 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
 
   return (
     <div className="p-4 space-y-4">
+      {/* Hidden file input for .ovpn */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept=".ovpn"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       {/* Action Buttons */}
       <div className="flex gap-2">
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-amber-600/20 transition-all"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          Import .ovpn
+        </button>
         <button
           onClick={() => setShowImportModal(true)}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-orange-600/20 transition-all"
@@ -125,14 +219,19 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
             <Server className="w-8 h-8 mx-auto mb-2 opacity-50" />
             <p className="text-xs font-medium">No VPN profiles configured</p>
             <p className="text-[11px] text-slate-600 mt-1">
-              Import a VLESS or Shadowsocks link to get started
+              Import an .ovpn file or VLESS / Shadowsocks link to get started
             </p>
           </div>
         ) : (
           profiles.map((p) => {
             const isActive = p.id === activeProfileId;
             const isVless = p.protocol.type === "Vless";
+            const isOpenvpn = p.protocol.type === "Openvpn";
             const isReality = isVless && (p.protocol as VlessConfig).reality;
+            const ovpnProto = isOpenvpn
+              ? (p.protocol as OpenvpnConfig).proto?.toUpperCase()
+              : "";
+            const ovpnCipher = isOpenvpn ? (p.protocol as OpenvpnConfig).cipher : null;
 
             return (
               <div
@@ -156,16 +255,27 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                   </div>
 
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-xs font-semibold text-slate-200 truncate">
                         {p.name}
                       </p>
-                      <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-slate-800 text-slate-400 border border-slate-700">
-                        {p.protocol.type.toUpperCase()}
-                      </span>
+                      {isOpenvpn ? (
+                        <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-amber-950 text-amber-400 border border-amber-800/50">
+                          OPENVPN {ovpnProto}
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-slate-800 text-slate-400 border border-slate-700">
+                          {p.protocol.type.toUpperCase()}
+                        </span>
+                      )}
                       {isReality && (
                         <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-emerald-950 text-emerald-400 border border-emerald-800/50">
                           REALITY
+                        </span>
+                      )}
+                      {ovpnCipher && (
+                        <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-slate-800/80 text-slate-400 border border-slate-700/60">
+                          {ovpnCipher}
                         </span>
                       )}
                     </div>
@@ -192,6 +302,85 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
           })
         )}
       </div>
+
+      {/* OpenVPN Credentials / Options Modal */}
+      {showOvpnModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-5 space-y-4 shadow-2xl">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Lock className="w-4 h-4 text-amber-400" />
+              OpenVPN Configuration & Credentials
+            </h3>
+
+            {ovpnFilePath ? (
+              <p className="text-xs text-slate-400 font-mono bg-slate-950 p-2 rounded border border-slate-800 truncate">
+                File: {ovpnFilePath}
+              </p>
+            ) : null}
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  Username (optional / if required by server)
+                </label>
+                <input
+                  type="text"
+                  value={ovpnUsername}
+                  onChange={(e) => setOvpnUsername(e.target.value)}
+                  placeholder="Username"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  Password / Passphrase (optional)
+                </label>
+                <input
+                  type="password"
+                  value={ovpnPassword}
+                  onChange={(e) => setOvpnPassword(e.target.value)}
+                  placeholder="Password"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
+                />
+              </div>
+
+              {ovpnContent ? (
+                <div>
+                  <label className="block text-slate-400 mb-1">OVPN Content</label>
+                  <textarea
+                    rows={4}
+                    value={ovpnContent}
+                    onChange={(e) => setOvpnContent(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 font-mono"
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            {ovpnError && (
+              <p className="text-xs text-rose-400 bg-rose-950/40 p-2.5 rounded-lg border border-rose-800/50">
+                {ovpnError}
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowOvpnModal(false)}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleOvpnSubmit}
+                className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-xl"
+              >
+                Save Profile
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Import URI Modal */}
       {showImportModal && (

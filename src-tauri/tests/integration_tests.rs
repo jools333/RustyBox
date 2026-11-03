@@ -379,3 +379,80 @@ fn test_scenario_13_auto_connect_setting() {
     let reloaded = ConfigManager::new(config_path);
     assert!(reloaded.get_config().auto_connect);
 }
+
+// 14. Scenario 14: Import OpenVPN config with separate cert/key files and generate valid sing-box config
+#[test]
+fn test_scenario_14_openvpn_import_and_config() {
+    let dir = tempdir().unwrap();
+    let ca_file = dir.path().join("ca.crt");
+    let cert_file = dir.path().join("client.crt");
+    let key_file = dir.path().join("client.key");
+
+    std::fs::write(
+        &ca_file,
+        "-----BEGIN CERTIFICATE-----\nCA_TEST\n-----END CERTIFICATE-----",
+    )
+    .unwrap();
+    std::fs::write(
+        &cert_file,
+        "-----BEGIN CERTIFICATE-----\nCLIENT_CERT_TEST\n-----END CERTIFICATE-----",
+    )
+    .unwrap();
+    std::fs::write(
+        &key_file,
+        "-----BEGIN PRIVATE KEY-----\nCLIENT_KEY_TEST\n-----END PRIVATE KEY-----",
+    )
+    .unwrap();
+
+    let ovpn_file = dir.path().join("myvpn.ovpn");
+    let ovpn_content = r#"
+client
+dev tun
+proto udp
+remote 195.122.253.130 12345
+ca ca.crt
+cert client.crt
+key client.key
+cipher AES-256-CBC
+comp-lzo
+verb 3
+"#;
+    std::fs::write(&ovpn_file, ovpn_content).unwrap();
+
+    let profile_mgr = ProfileManager::default();
+    let profile = profile_mgr
+        .import_ovpn_file(&ovpn_file)
+        .expect("Should import ovpn file");
+    assert_eq!(profile.name, "myvpn");
+    assert_eq!(profile.server, "195.122.253.130");
+    assert_eq!(profile.port, 12345);
+
+    let core_mgr = CoreManager::new(LogManager::default());
+    let cfg = core_mgr.generate_singbox_config(
+        &profile,
+        RoutingMode::GlobalVpn,
+        RuleAction::Vpn,
+        &[],
+        "1.1.1.1",
+        "77.88.8.8",
+        "rustybox-tun",
+        "info",
+    );
+
+    assert_eq!(cfg["endpoints"][0]["type"], "openvpn-client");
+    assert_eq!(cfg["endpoints"][0]["tag"], "proxy");
+    assert_eq!(cfg["endpoints"][0]["allow_compression"], "yes");
+    assert_eq!(cfg["endpoints"][0]["data_ciphers"][0], "AES-256-CBC");
+    assert!(cfg["endpoints"][0]["tls"]["certificate"][0]
+        .as_str()
+        .unwrap()
+        .contains("CA_TEST"));
+    assert!(cfg["endpoints"][0]["tls"]["client_certificate"][0]
+        .as_str()
+        .unwrap()
+        .contains("CLIENT_CERT_TEST"));
+    assert!(cfg["endpoints"][0]["tls"]["client_key"][0]
+        .as_str()
+        .unwrap()
+        .contains("CLIENT_KEY_TEST"));
+}

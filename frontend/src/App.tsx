@@ -248,6 +248,7 @@ export const App: React.FC = () => {
             onImportUri={handleImportUri}
             onAdd={handleAddProfile}
             onDelete={handleDeleteProfile}
+            onReload={loadAllData}
           />
         )}
 

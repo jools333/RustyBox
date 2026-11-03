@@ -143,6 +143,8 @@ pub fn run() {
             commands::get_profiles,
             commands::add_profile,
             commands::import_profile_uri,
+            commands::import_ovpn_file,
+            commands::import_ovpn_content,
             commands::update_profile,
             commands::delete_profile,
             commands::select_profile,

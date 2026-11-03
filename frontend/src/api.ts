@@ -155,6 +155,40 @@ export const api = {
     return invoke<Profile>("import_profile_uri", { uri });
   },
 
+  importOvpnFile: async (
+    filePath: string,
+    username?: string,
+    password?: string
+  ): Promise<Profile> => {
+    if (!isTauri()) throw new Error("Tauri IPC only");
+    return invoke<Profile>("import_ovpn_file", {
+      filePath,
+      username: username || null,
+      password: password || null,
+    });
+  },
+
+  importOvpnContent: async (
+    content: string,
+    name?: string,
+    username?: string,
+    password?: string,
+    caCert?: string,
+    clientCert?: string,
+    clientKey?: string
+  ): Promise<Profile> => {
+    if (!isTauri()) throw new Error("Tauri IPC only");
+    return invoke<Profile>("import_ovpn_content", {
+      content,
+      name: name || null,
+      username: username || null,
+      password: password || null,
+      caCert: caCert || null,
+      clientCert: clientCert || null,
+      clientKey: clientKey || null,
+    });
+  },
+
   updateProfile: async (profile: Profile): Promise<void> => {
     if (!isTauri()) return;
     return invoke("update_profile", { profile });

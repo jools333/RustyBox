@@ -24,6 +24,24 @@ pub enum ProfileError {
     MissingParameter(String),
     #[error("Profile not found: {0}")]
     NotFound(String),
+    #[error("Invalid OpenVPN configuration: {0}")]
+    InvalidOvpn(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OpenvpnConfig {
+    pub proto: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub ca_cert: Option<String>,
+    pub client_cert: Option<String>,
+    pub client_key: Option<String>,
+    pub cipher: Option<String>,
+    pub comp_lzo: bool,
+    pub tls_auth: Option<String>,
+    pub tls_crypt: Option<String>,
+    pub auth_user_pass_required: bool,
+    pub raw_ovpn: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -50,6 +68,7 @@ pub struct ShadowsocksConfig {
 pub enum ProtocolConfig {
     Vless(VlessConfig),
     Shadowsocks(ShadowsocksConfig),
+    Openvpn(OpenvpnConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -86,6 +105,17 @@ impl Profile {
             server,
             port,
             protocol: ProtocolConfig::Shadowsocks(config),
+            latency_ms: None,
+        }
+    }
+
+    pub fn new_openvpn(name: String, server: String, port: u16, config: OpenvpnConfig) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            server,
+            port,
+            protocol: ProtocolConfig::Openvpn(config),
             latency_ms: None,
         }
     }
@@ -346,6 +376,361 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
     })
 }
 
+fn tokenize_ovpn_line(line: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quote: Option<char> = None;
+
+    for ch in line.chars() {
+        if let Some(quote_char) = in_quote {
+            if ch == quote_char {
+                in_quote = None;
+            } else {
+                current.push(ch);
+            }
+        } else if ch == '"' || ch == '\'' {
+            in_quote = Some(ch);
+        } else if ch == '#' || ch == ';' {
+            break;
+        } else if ch.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(current);
+                current = String::new();
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Parses an OpenVPN configuration text into a RustyBox Profile.
+///
+/// If `base_dir` is provided and relative file paths are specified in `ca`, `cert`, `key`,
+/// etc., they will be read from `base_dir` and inlined into the resulting profile.
+#[allow(clippy::collapsible_match)]
+pub fn parse_ovpn(
+    content: &str,
+    base_dir: Option<&std::path::Path>,
+    default_name: Option<&str>,
+) -> Result<Profile, ProfileError> {
+    let mut server: Option<String> = None;
+    let mut port: Option<u16> = None;
+    let mut proto = "udp".to_string();
+    let mut cipher: Option<String> = None;
+    let mut comp_lzo = false;
+    let mut auth_user_pass_required = false;
+    let mut username: Option<String> = None;
+    let mut password: Option<String> = None;
+    let mut ca_cert: Option<String> = None;
+    let mut client_cert: Option<String> = None;
+    let mut client_key: Option<String> = None;
+    let mut tls_auth: Option<String> = None;
+    let mut tls_crypt: Option<String> = None;
+
+    // First pass: extract inline blocks like <ca>...</ca>, <cert>...</cert>, <key>...</key>
+    let mut inline_blocks: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut current_block_tag: Option<String> = None;
+    let mut current_block_content = String::new();
+    let mut non_block_lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(ref tag) = current_block_tag {
+            let close_tag = format!("</{}>", tag);
+            if trimmed.eq_ignore_ascii_case(&close_tag) {
+                inline_blocks.insert(tag.clone(), current_block_content.trim().to_string());
+                current_block_tag = None;
+                current_block_content.clear();
+            } else {
+                current_block_content.push_str(line);
+                current_block_content.push('\n');
+            }
+            continue;
+        }
+
+        if trimmed.starts_with('<') && trimmed.ends_with('>') && !trimmed.starts_with("</") {
+            let tag = trimmed[1..trimmed.len() - 1].trim().to_lowercase();
+            if matches!(
+                tag.as_str(),
+                "ca" | "cert" | "key" | "tls-auth" | "tls-crypt" | "auth-user-pass" | "secret"
+            ) {
+                current_block_tag = Some(tag);
+                current_block_content.clear();
+                continue;
+            }
+        }
+
+        non_block_lines.push(line);
+    }
+
+    if let Some(ca) = inline_blocks.get("ca") {
+        ca_cert = Some(ca.clone());
+    }
+    if let Some(cert) = inline_blocks.get("cert") {
+        client_cert = Some(cert.clone());
+    }
+    if let Some(key) = inline_blocks.get("key") {
+        client_key = Some(key.clone());
+    }
+    if let Some(ta) = inline_blocks.get("tls-auth") {
+        tls_auth = Some(ta.clone());
+    }
+    if let Some(tc) = inline_blocks.get("tls-crypt") {
+        tls_crypt = Some(tc.clone());
+    }
+    if let Some(creds) = inline_blocks.get("auth-user-pass") {
+        auth_user_pass_required = true;
+        let mut lines = creds.lines();
+        if let Some(u) = lines.next() {
+            username = Some(u.trim().to_string());
+        }
+        if let Some(p) = lines.next() {
+            password = Some(p.trim().to_string());
+        }
+    }
+
+    // Second pass: parse line-by-line directives
+    for line in non_block_lines {
+        let tokens = tokenize_ovpn_line(line);
+        if tokens.is_empty() {
+            continue;
+        }
+
+        let directive = tokens[0].to_lowercase();
+        match directive.as_str() {
+            "remote" => {
+                if tokens.len() >= 2 {
+                    if server.is_none() {
+                        server = Some(tokens[1].clone());
+                    }
+                    if tokens.len() >= 3 && port.is_none() {
+                        if let Ok(p) = tokens[2].parse::<u16>() {
+                            port = Some(p);
+                        }
+                    }
+                    if tokens.len() >= 4 {
+                        let p = tokens[3].to_lowercase();
+                        if p.contains("tcp") {
+                            proto = "tcp".to_string();
+                        } else if p.contains("udp") {
+                            proto = "udp".to_string();
+                        }
+                    }
+                }
+            }
+            "port" | "rport" => {
+                if tokens.len() >= 2 && port.is_none() {
+                    if let Ok(p) = tokens[1].parse::<u16>() {
+                        port = Some(p);
+                    }
+                }
+            }
+            "proto" => {
+                if tokens.len() >= 2 {
+                    let p = tokens[1].to_lowercase();
+                    if p.contains("tcp") {
+                        proto = "tcp".to_string();
+                    } else {
+                        proto = "udp".to_string();
+                    }
+                }
+            }
+            "dev" => {
+                if tokens.len() >= 2 {
+                    let dev = tokens[1].to_lowercase();
+                    if dev.starts_with("tap") {
+                        return Err(ProfileError::InvalidOvpn(
+                            "TAP mode is not supported by RustyBox (only TUN mode is supported)"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            "cipher" => {
+                if tokens.len() >= 2 && cipher.is_none() {
+                    cipher = Some(tokens[1].clone());
+                }
+            }
+            "data-ciphers" => {
+                if tokens.len() >= 2 && cipher.is_none() {
+                    cipher = Some(tokens[1].clone());
+                }
+            }
+            "comp-lzo" | "compress" => {
+                comp_lzo = true;
+            }
+            "auth-user-pass" => {
+                auth_user_pass_required = true;
+                if tokens.len() >= 2 && username.is_none() {
+                    let file_arg = &tokens[1];
+                    if let Some(base) = base_dir {
+                        let path = if std::path::Path::new(file_arg).is_relative() {
+                            base.join(file_arg)
+                        } else {
+                            std::path::PathBuf::from(file_arg)
+                        };
+                        if let Ok(file_content) = std::fs::read_to_string(&path) {
+                            let mut lines = file_content.lines();
+                            if let Some(u) = lines.next() {
+                                username = Some(u.trim().to_string());
+                            }
+                            if let Some(p) = lines.next() {
+                                password = Some(p.trim().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            "ca" => {
+                if ca_cert.is_none() && tokens.len() >= 2 {
+                    let file_arg = &tokens[1];
+                    if let Some(base) = base_dir {
+                        let path = if std::path::Path::new(file_arg).is_relative() {
+                            base.join(file_arg)
+                        } else {
+                            std::path::PathBuf::from(file_arg)
+                        };
+                        match std::fs::read_to_string(&path) {
+                            Ok(cert_data) => ca_cert = Some(cert_data),
+                            Err(e) => {
+                                return Err(ProfileError::InvalidOvpn(format!(
+                                    "CA certificate file '{}' could not be read: {}",
+                                    path.display(),
+                                    e
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+            "cert" => {
+                if client_cert.is_none() && tokens.len() >= 2 {
+                    let file_arg = &tokens[1];
+                    if let Some(base) = base_dir {
+                        let path = if std::path::Path::new(file_arg).is_relative() {
+                            base.join(file_arg)
+                        } else {
+                            std::path::PathBuf::from(file_arg)
+                        };
+                        match std::fs::read_to_string(&path) {
+                            Ok(cert_data) => client_cert = Some(cert_data),
+                            Err(e) => {
+                                return Err(ProfileError::InvalidOvpn(format!(
+                                    "Client certificate file '{}' could not be read: {}",
+                                    path.display(),
+                                    e
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+            "key" => {
+                if client_key.is_none() && tokens.len() >= 2 {
+                    let file_arg = &tokens[1];
+                    if let Some(base) = base_dir {
+                        let path = if std::path::Path::new(file_arg).is_relative() {
+                            base.join(file_arg)
+                        } else {
+                            std::path::PathBuf::from(file_arg)
+                        };
+                        match std::fs::read_to_string(&path) {
+                            Ok(key_data) => client_key = Some(key_data),
+                            Err(e) => {
+                                return Err(ProfileError::InvalidOvpn(format!(
+                                    "Client private key file '{}' could not be read: {}",
+                                    path.display(),
+                                    e
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+            "tls-auth" => {
+                if tls_auth.is_none() && tokens.len() >= 2 {
+                    let file_arg = &tokens[1];
+                    if let Some(base) = base_dir {
+                        let path = if std::path::Path::new(file_arg).is_relative() {
+                            base.join(file_arg)
+                        } else {
+                            std::path::PathBuf::from(file_arg)
+                        };
+                        if let Ok(key_data) = std::fs::read_to_string(&path) {
+                            tls_auth = Some(key_data);
+                        }
+                    }
+                }
+            }
+            "tls-crypt" => {
+                if tls_crypt.is_none() && tokens.len() >= 2 {
+                    let file_arg = &tokens[1];
+                    if let Some(base) = base_dir {
+                        let path = if std::path::Path::new(file_arg).is_relative() {
+                            base.join(file_arg)
+                        } else {
+                            std::path::PathBuf::from(file_arg)
+                        };
+                        if let Ok(key_data) = std::fs::read_to_string(&path) {
+                            tls_crypt = Some(key_data);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let server = server.ok_or_else(|| {
+        ProfileError::InvalidOvpn("Missing 'remote' server address in ovpn config".to_string())
+    })?;
+    let port = port.unwrap_or(1194);
+
+    let name = default_name
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("OpenVPN {}:{}", server, port));
+
+    let config = OpenvpnConfig {
+        proto,
+        username,
+        password,
+        ca_cert,
+        client_cert,
+        client_key,
+        cipher,
+        comp_lzo,
+        tls_auth,
+        tls_crypt,
+        auth_user_pass_required,
+        raw_ovpn: Some(content.to_string()),
+    };
+
+    Ok(Profile {
+        id: Uuid::new_v4().to_string(),
+        name,
+        server,
+        port,
+        protocol: ProtocolConfig::Openvpn(config),
+        latency_ms: None,
+    })
+}
+
+pub fn parse_ovpn_file(path: &std::path::Path) -> Result<Profile, ProfileError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| ProfileError::InvalidOvpn(format!("Failed to read ovpn file: {}", e)))?;
+    let base_dir = path.parent();
+    let default_name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty());
+    parse_ovpn(&content, base_dir, default_name)
+}
+
 #[derive(Clone, Default)]
 pub struct ProfileManager {
     profiles: Arc<RwLock<Vec<Profile>>>,
@@ -379,6 +764,23 @@ impl ProfileManager {
 
     pub fn import_uri(&self, uri: &str) -> Result<Profile, ProfileError> {
         let profile = parse_profile_uri(uri)?;
+        self.add(profile.clone());
+        Ok(profile)
+    }
+
+    pub fn import_ovpn_file(&self, path: &std::path::Path) -> Result<Profile, ProfileError> {
+        let profile = parse_ovpn_file(path)?;
+        self.add(profile.clone());
+        Ok(profile)
+    }
+
+    pub fn import_ovpn_content(
+        &self,
+        content: &str,
+        base_dir: Option<&std::path::Path>,
+        name: Option<&str>,
+    ) -> Result<Profile, ProfileError> {
+        let profile = parse_ovpn(content, base_dir, name)?;
         self.add(profile.clone());
         Ok(profile)
     }
@@ -546,5 +948,129 @@ mod tests {
 
         mgr.delete(&p1.id).unwrap();
         assert_eq!(mgr.list().len(), 0);
+    }
+
+    #[test]
+    fn test_parse_user_ovpn_with_external_files() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let ca_file = base_path.join("ca.crt");
+        let cert_file = base_path.join("nosyrev26.crt");
+        let key_file = base_path.join("nosyrev26.key");
+
+        std::fs::write(
+            &ca_file,
+            "-----BEGIN CERTIFICATE-----\nCA_CONTENT\n-----END CERTIFICATE-----",
+        )
+        .unwrap();
+        std::fs::write(
+            &cert_file,
+            "-----BEGIN CERTIFICATE-----\nCERT_CONTENT\n-----END CERTIFICATE-----",
+        )
+        .unwrap();
+        std::fs::write(
+            &key_file,
+            "-----BEGIN PRIVATE KEY-----\nKEY_CONTENT\n-----END PRIVATE KEY-----",
+        )
+        .unwrap();
+
+        let ovpn_content = r#"
+client
+dev tun
+proto udp
+# Адрес и порт сервера
+remote 195.122.253.130 12345
+# Ключи должны лежать в папке с конфигом
+ca ca.crt
+cert nosyrev26.crt
+key nosyrev26.key
+# remote-cert-tls server
+cipher AES-256-CBC
+nobind
+comp-lzo
+persist-key
+persist-tun
+verb 3
+#iroute 192.168.100.0 255.255.254.0
+"#;
+
+        let ovpn_file = base_path.join("client.ovpn");
+        std::fs::write(&ovpn_file, ovpn_content).unwrap();
+
+        let profile = parse_ovpn_file(&ovpn_file).expect("Should parse user's OpenVPN file");
+        assert_eq!(profile.name, "client");
+        assert_eq!(profile.server, "195.122.253.130");
+        assert_eq!(profile.port, 12345);
+
+        match profile.protocol {
+            ProtocolConfig::Openvpn(cfg) => {
+                assert_eq!(cfg.proto, "udp");
+                assert_eq!(cfg.cipher, Some("AES-256-CBC".to_string()));
+                assert!(cfg.comp_lzo);
+                assert!(cfg.ca_cert.unwrap().contains("CA_CONTENT"));
+                assert!(cfg.client_cert.unwrap().contains("CERT_CONTENT"));
+                assert!(cfg.client_key.unwrap().contains("KEY_CONTENT"));
+            }
+            _ => panic!("Expected Openvpn config"),
+        }
+    }
+
+    #[test]
+    fn test_parse_ovpn_with_inline_blocks() {
+        let ovpn_content = r#"
+client
+dev tun
+proto tcp
+remote vpn.example.com 443
+cipher AES-128-GCM
+auth-user-pass
+<ca>
+-----BEGIN CERTIFICATE-----
+INLINE_CA
+-----END CERTIFICATE-----
+</ca>
+<cert>
+-----BEGIN CERTIFICATE-----
+INLINE_CERT
+-----END CERTIFICATE-----
+</cert>
+<key>
+-----BEGIN PRIVATE KEY-----
+INLINE_KEY
+-----END PRIVATE KEY-----
+</key>
+"#;
+
+        let profile = parse_ovpn(ovpn_content, None, Some("Corporate VPN")).unwrap();
+        assert_eq!(profile.name, "Corporate VPN");
+        assert_eq!(profile.server, "vpn.example.com");
+        assert_eq!(profile.port, 443);
+
+        match profile.protocol {
+            ProtocolConfig::Openvpn(cfg) => {
+                assert_eq!(cfg.proto, "tcp");
+                assert_eq!(cfg.cipher, Some("AES-128-GCM".to_string()));
+                assert!(cfg.auth_user_pass_required);
+                assert!(cfg.ca_cert.unwrap().contains("INLINE_CA"));
+                assert!(cfg.client_cert.unwrap().contains("INLINE_CERT"));
+                assert!(cfg.client_key.unwrap().contains("INLINE_KEY"));
+            }
+            _ => panic!("Expected Openvpn config"),
+        }
+    }
+
+    #[test]
+    fn test_reject_tap_mode() {
+        let ovpn_content = "dev tap\nremote 1.2.3.4 1194";
+        let res = parse_ovpn(ovpn_content, None, None);
+        assert!(matches!(res, Err(ProfileError::InvalidOvpn(_))));
+    }
+
+    #[test]
+    fn test_reject_missing_remote() {
+        let ovpn_content = "dev tun\nproto udp";
+        let res = parse_ovpn(ovpn_content, None, None);
+        assert!(matches!(res, Err(ProfileError::InvalidOvpn(_))));
     }
 }

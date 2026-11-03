@@ -179,6 +179,15 @@ pub fn mask_secrets(input: &str) -> String {
             .to_string();
     }
 
+    // Mask PEM private keys (e.g. OpenVPN client_key)
+    if let Ok(re_pem_key) = Regex::new(
+        r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    ) {
+        out = re_pem_key
+            .replace_all(&out, "[MASKED-PRIVATE-KEY]")
+            .to_string();
+    }
+
     out
 }
 
@@ -224,5 +233,13 @@ mod tests {
         let masked = mask_secrets(uri);
         assert!(!masked.contains("eJLKUbnWBkXSgMfvFhOkm8kwNPl276dlduExy7WRDdY"));
         assert!(masked.contains("ss://[MASKED-CREDENTIALS]@jools.com.ru:39674#z041uzf1"));
+    }
+
+    #[test]
+    fn test_mask_pem_private_key() {
+        let text = "Loaded key: -----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY----- successfully";
+        let masked = mask_secrets(text);
+        assert!(!masked.contains("MIIEowIBAAKCAQEA"));
+        assert!(masked.contains("[MASKED-PRIVATE-KEY]"));
     }
 }

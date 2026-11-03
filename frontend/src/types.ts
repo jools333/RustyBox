@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.11";
+export const APP_VERSION = "0.1.12";
 
 export type ConnectionState = "disconnected" | "starting" | "connected" | "stopping" | "error";
 
@@ -19,9 +19,25 @@ export interface ShadowsocksConfig {
   password: string;
 }
 
+export interface OpenvpnConfig {
+  proto: string;
+  username?: string;
+  password?: string;
+  ca_cert?: string;
+  client_cert?: string;
+  client_key?: string;
+  cipher?: string;
+  comp_lzo: boolean;
+  tls_auth?: string;
+  tls_crypt?: string;
+  auth_user_pass_required: boolean;
+  raw_ovpn?: string;
+}
+
 export type ProtocolConfig =
   | ({ type: "Vless" } & VlessConfig)
-  | ({ type: "Shadowsocks" } & ShadowsocksConfig);
+  | ({ type: "Shadowsocks" } & ShadowsocksConfig)
+  | ({ type: "Openvpn" } & OpenvpnConfig);
 
 export interface Profile {
   id: string;

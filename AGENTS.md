@@ -15,6 +15,7 @@ This document serves as the primary technical specification, operational referen
 ### Supported Protocols
 - **VLESS**: REALITY with `x25519`, TLS, UUID v4 authentication, `xtls-rprx-vision` flow.
 - **Shadowsocks**: Standard AEAD (`aes-128-gcm`, `aes-256-gcm`, `chacha20-ietf-poly1305`) and AEAD 2022 ciphers (`2022-blake3-aes-128-gcm`, `2022-blake3-aes-256-gcm`, `2022-blake3-chacha20-poly1305`).
+- **OpenVPN**: Full `.ovpn` configuration import (monolithic with inline `<ca>/<cert>/<key>` or modular with separate `.crt`/`.key` files), supporting UDP/TCP, `dev tun`, legacy and modern data ciphers (`AES-256-CBC`, `AES-256-GCM`), LZO compression (`comp-lzo`), mTLS certificates, static keys, and username/password authentication via sing-box 1.14 `openvpn-client` endpoints.
 
 ### Operating Modes
 - **TUN Virtual Interface Mode**: Complete system-wide packet capture via `rustybox-tun` adapter (`172.19.0.1/30` IPv4, `fdfe:dcba:9876::1/126` IPv6).

@@ -54,6 +54,78 @@ pub fn import_profile_uri(state: State<'_, AppState>, uri: String) -> Result<Pro
 }
 
 #[tauri::command]
+pub fn import_ovpn_file(
+    state: State<'_, AppState>,
+    file_path: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<Profile, String> {
+    let path = std::path::Path::new(&file_path);
+    let mut profile = crate::profiles::parse_ovpn_file(path).map_err(|e| e.to_string())?;
+
+    if let crate::profiles::ProtocolConfig::Openvpn(ref mut cfg) = profile.protocol {
+        if username.is_some() {
+            cfg.username = username;
+        }
+        if password.is_some() {
+            cfg.password = password;
+        }
+    }
+
+    state.profiles.add(profile.clone());
+    let _ = state.config.update(|c| {
+        c.profiles = state.profiles.list();
+        if c.active_profile_id.is_none() {
+            c.active_profile_id = Some(profile.id.clone());
+        }
+    });
+    Ok(profile)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn import_ovpn_content(
+    state: State<'_, AppState>,
+    name: Option<String>,
+    content: String,
+    username: Option<String>,
+    password: Option<String>,
+    ca_cert: Option<String>,
+    client_cert: Option<String>,
+    client_key: Option<String>,
+) -> Result<Profile, String> {
+    let mut profile =
+        crate::profiles::parse_ovpn(&content, None, name.as_deref()).map_err(|e| e.to_string())?;
+
+    if let crate::profiles::ProtocolConfig::Openvpn(ref mut cfg) = profile.protocol {
+        if username.is_some() {
+            cfg.username = username;
+        }
+        if password.is_some() {
+            cfg.password = password;
+        }
+        if ca_cert.is_some() {
+            cfg.ca_cert = ca_cert;
+        }
+        if client_cert.is_some() {
+            cfg.client_cert = client_cert;
+        }
+        if client_key.is_some() {
+            cfg.client_key = client_key;
+        }
+    }
+
+    state.profiles.add(profile.clone());
+    let _ = state.config.update(|c| {
+        c.profiles = state.profiles.list();
+        if c.active_profile_id.is_none() {
+            c.active_profile_id = Some(profile.id.clone());
+        }
+    });
+    Ok(profile)
+}
+
+#[tauri::command]
 pub fn update_profile(state: State<'_, AppState>, profile: Profile) -> Result<(), String> {
     state.profiles.update(profile).map_err(|e| e.to_string())?;
     let _ = state.config.update(|c| {

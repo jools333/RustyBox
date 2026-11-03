@@ -494,7 +494,15 @@ impl CoreManager {
         tun_interface_name: &str,
         log_level: &str,
     ) -> serde_json::Value {
-        let proxy_outbound = match &profile.protocol {
+        let mut endpoints = Vec::new();
+        let mut outbounds = Vec::new();
+
+        outbounds.push(json!({
+            "type": "direct",
+            "tag": "direct"
+        }));
+
+        match &profile.protocol {
             ProtocolConfig::Vless(cfg) => {
                 let mut vless_json = json!({
                     "type": "vless",
@@ -545,24 +553,83 @@ impl CoreManager {
                     }
                 }
 
-                vless_json
+                outbounds.insert(0, vless_json);
             }
             ProtocolConfig::Shadowsocks(cfg) => {
-                json!({
-                    "type": "shadowsocks",
+                outbounds.insert(
+                    0,
+                    json!({
+                        "type": "shadowsocks",
+                        "tag": "proxy",
+                        "server": profile.server,
+                        "server_port": profile.port,
+                        "method": cfg.method,
+                        "password": cfg.password
+                    }),
+                );
+            }
+            ProtocolConfig::Openvpn(cfg) => {
+                let network = if cfg.proto.to_lowercase().contains("tcp") {
+                    "tcp"
+                } else {
+                    "udp"
+                };
+                let mut ovpn_json = json!({
+                    "type": "openvpn-client",
                     "tag": "proxy",
                     "server": profile.server,
                     "server_port": profile.port,
-                    "method": cfg.method,
-                    "password": cfg.password
-                })
+                    "network": network,
+                });
+
+                if let Some(ref cipher) = cfg.cipher {
+                    ovpn_json["data_ciphers"] = json!([cipher]);
+                }
+
+                if cfg.comp_lzo {
+                    ovpn_json["allow_compression"] = json!("yes");
+                }
+
+                if let Some(ref user) = cfg.username {
+                    ovpn_json["username"] = json!(user);
+                }
+                if let Some(ref pass) = cfg.password {
+                    ovpn_json["password"] = json!(pass);
+                }
+
+                let mut tls_json = json!({});
+                tls_json["server_name"] = json!(profile.server);
+
+                if let Some(ref ca) = cfg.ca_cert {
+                    let trimmed = ca.trim();
+                    if !trimmed.is_empty() {
+                        tls_json["certificate"] = json!([trimmed]);
+                    }
+                }
+                if let Some(ref cert) = cfg.client_cert {
+                    let trimmed = cert.trim();
+                    if !trimmed.is_empty() {
+                        tls_json["client_certificate"] = json!([trimmed]);
+                    }
+                }
+                if let Some(ref key) = cfg.client_key {
+                    let trimmed = key.trim();
+                    if !trimmed.is_empty() {
+                        tls_json["client_key"] = json!([trimmed]);
+                    }
+                }
+                ovpn_json["tls"] = tls_json;
+
+                if let Some(ref tls_auth) = cfg.tls_auth {
+                    let trimmed = tls_auth.trim();
+                    if !trimmed.is_empty() {
+                        ovpn_json["static_key"] = json!([trimmed]);
+                    }
+                }
+
+                endpoints.push(ovpn_json);
             }
         };
-
-        let direct_outbound = json!({
-            "type": "direct",
-            "tag": "direct"
-        });
 
         let mut dns_rules = Vec::new();
         let mut route_rules = Vec::new();
@@ -639,7 +706,7 @@ impl CoreManager {
             _direct_dns
         };
 
-        json!({
+        let mut final_config = json!({
             "log": {
                 "level": log_level,
                 "timestamp": true
@@ -662,14 +729,20 @@ impl CoreManager {
                 "final": final_dns
             },
             "inbounds": [tun_inbound],
-            "outbounds": [proxy_outbound, direct_outbound],
+            "outbounds": outbounds,
             "route": {
                 "auto_detect_interface": true,
                 "default_domain_resolver": "dns-direct",
                 "rules": route_rules,
                 "final": final_outbound
             }
-        })
+        });
+
+        if !endpoints.is_empty() {
+            final_config["endpoints"] = json!(endpoints);
+        }
+
+        final_config
     }
 
     pub fn validate_config(&self, config: &serde_json::Value) -> Result<(), CoreError> {
@@ -1211,5 +1284,71 @@ mod tests {
                 PathBuf::from("/usr/bin/sing-box")
             );
         }
+    }
+
+    #[test]
+    fn test_generate_openvpn_singbox_config() {
+        use crate::profiles::OpenvpnConfig;
+        let core_mgr = CoreManager::new(LogManager::default());
+        let profile = Profile::new_openvpn(
+            "TestOVPN".to_string(),
+            "195.122.253.130".to_string(),
+            12345,
+            OpenvpnConfig {
+                proto: "udp".to_string(),
+                username: Some("user1".to_string()),
+                password: Some("secret".to_string()),
+                ca_cert: Some(
+                    "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----".to_string(),
+                ),
+                client_cert: Some(
+                    "-----BEGIN CERTIFICATE-----\nCERT\n-----END CERTIFICATE-----".to_string(),
+                ),
+                client_key: Some(
+                    "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----".to_string(),
+                ),
+                cipher: Some("AES-256-CBC".to_string()),
+                comp_lzo: true,
+                tls_auth: None,
+                tls_crypt: None,
+                auth_user_pass_required: true,
+                raw_ovpn: None,
+            },
+        );
+
+        let cfg = core_mgr.generate_singbox_config(
+            &profile,
+            RoutingMode::GlobalVpn,
+            RuleAction::Vpn,
+            &[],
+            "1.1.1.1",
+            "77.88.8.8",
+            "rustybox-tun",
+            "info",
+        );
+
+        let endpoints = cfg["endpoints"].as_array().expect("Should have endpoints");
+        assert_eq!(endpoints.len(), 1);
+        let ep = &endpoints[0];
+        assert_eq!(ep["type"], "openvpn-client");
+        assert_eq!(ep["tag"], "proxy");
+        assert_eq!(ep["server"], "195.122.253.130");
+        assert_eq!(ep["server_port"], 12345);
+        assert_eq!(ep["network"], "udp");
+        assert_eq!(ep["allow_compression"], "yes");
+        assert_eq!(ep["username"], "user1");
+        assert_eq!(ep["password"], "secret");
+        assert_eq!(ep["data_ciphers"][0], "AES-256-CBC");
+        assert_eq!(ep["tls"]["server_name"], "195.122.253.130");
+        assert!(ep["tls"]["certificate"][0].as_str().unwrap().contains("CA"));
+        assert!(ep["tls"]["client_certificate"][0]
+            .as_str()
+            .unwrap()
+            .contains("CERT"));
+        assert!(ep["tls"]["client_key"][0].as_str().unwrap().contains("KEY"));
+
+        let outbounds = cfg["outbounds"].as_array().expect("Should have outbounds");
+        assert_eq!(outbounds.len(), 1);
+        assert_eq!(outbounds[0]["tag"], "direct");
     }
 }
