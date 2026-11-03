@@ -1,26 +1,37 @@
 import React, { useEffect, useState } from "react";
-import { Power, Globe, AlertTriangle, Clock, Activity, ShieldAlert } from "lucide-react";
-import { ConnectionStatus, Profile, TunPrerequisites } from "../types";
+import { Power, Globe, AlertTriangle, Clock, Activity, ShieldAlert, Briefcase } from "lucide-react";
+import { AppConfig, ConnectionStatus, HostsEntries, Profile, TunPrerequisites } from "../types";
 import { api } from "../api";
 
 interface ConnectionPanelProps {
   status: ConnectionStatus;
   profiles: Profile[];
+  config?: AppConfig | null;
   tunPrereqs?: TunPrerequisites | null;
   onConnect: () => void;
   onDisconnect: () => void;
   onSelectProfile: (id: string) => void;
+  onConfigChange?: () => Promise<void>;
 }
 
 export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   status,
   profiles,
+  config,
   tunPrereqs,
   onConnect,
   onDisconnect,
   onSelectProfile,
+  onConfigChange,
 }) => {
   const [uptime, setUptime] = useState<string>("00:00:00");
+  const [detectedHosts, setDetectedHosts] = useState<HostsEntries | null>(null);
+
+  useEffect(() => {
+    api.getDetectedWorkResources().then((res) => {
+      setDetectedHosts(res);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (status.state === "connected" && status.connected_since) {
@@ -46,30 +57,103 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   const isConnected = status.state === "connected";
   const isBusy = status.state === "starting" || status.state === "stopping";
 
+  const workEnabled = config?.work_profile_enabled ?? false;
+  const workProfileId = config?.work_profile_id ?? null;
+
+  const handleToggleWork = async (enabled: boolean) => {
+    // If enabling and no work profile set, pick the first profile that isn't the primary one
+    let targetId = workProfileId;
+    if (enabled && !targetId) {
+      const primaryId = status.active_profile?.id || profiles[0]?.id;
+      const candidate = profiles.find((p) => p.id !== primaryId) || profiles[0];
+      targetId = candidate ? candidate.id : null;
+    }
+    await api.setWorkProfile(targetId, enabled);
+    if (onConfigChange) await onConfigChange();
+  };
+
+  const handleSelectWorkProfile = async (id: string) => {
+    await api.setWorkProfile(id || null, true);
+    if (onConfigChange) await onConfigChange();
+  };
+
   return (
-    <div className="flex flex-col items-center justify-between p-6 h-full max-w-sm mx-auto">
-      {/* Top Profile Selector */}
-      <div className="w-full">
-        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
-          Active Profile
-        </label>
-        {profiles.length === 0 ? (
-          <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-            No profiles available. Please add or import one in the Profiles tab.
+    <div className="flex flex-col items-center justify-between p-6 h-full max-w-sm mx-auto overflow-y-auto">
+      {/* Top Profiles Selector */}
+      <div className="w-full space-y-3">
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
+            Основной VPN (Интернет)
+          </label>
+          {profiles.length === 0 ? (
+            <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
+              No profiles available. Please add or import one in the Profiles tab.
+            </div>
+          ) : (
+            <select
+              value={status.active_profile?.id || ""}
+              disabled={isBusy || isConnected}
+              onChange={(e) => onSelectProfile(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
+            >
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.protocol.type.toUpperCase()} - {p.server}:{p.port})
+                  {p.only_network_resources ? " [Только сеть]" : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Dual-VPN Work Profile Selector */}
+        {profiles.length > 0 && (
+          <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={workEnabled}
+                  disabled={isBusy || isConnected}
+                  onChange={(e) => handleToggleWork(e.target.checked)}
+                  className="rounded bg-slate-950 border-slate-700 text-emerald-500 focus:ring-0 cursor-pointer"
+                />
+                <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                  <Briefcase className="w-3.5 h-3.5 text-emerald-400" />
+                  Рабочий VPN (второе подключение)
+                </span>
+              </label>
+              {detectedHosts && (
+                <span
+                  className="text-[10px] text-slate-400 font-mono bg-slate-800/80 px-1.5 py-0.5 rounded"
+                  title={`${detectedHosts.domains.length} доменов и ${detectedHosts.ip_cidrs.length} IP адресов найдено в hosts`}
+                >
+                  hosts: {detectedHosts.domains.length + detectedHosts.ip_cidrs.length}
+                </span>
+              )}
+            </div>
+
+            {workEnabled && (
+              <div className="space-y-1.5 mt-2.5 pt-2 border-t border-slate-800">
+                <select
+                  value={workProfileId || ""}
+                  disabled={isBusy || isConnected}
+                  onChange={(e) => handleSelectWorkProfile(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  <option value="">-- Выберите профиль рабочего VPN --</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.protocol.type.toUpperCase()} - {p.server}:{p.port})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400 leading-tight">
+                  Только для ресурсов этой сети: запросы к доменам и IP из <span className="text-emerald-400 font-mono">hosts</span> пойдут в рабочий VPN, весь остальной трафик — в основной.
+                </p>
+              </div>
+            )}
           </div>
-        ) : (
-          <select
-            value={status.active_profile?.id || ""}
-            disabled={isBusy}
-            onChange={(e) => onSelectProfile(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
-          >
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.protocol.type.toUpperCase()} - {p.server}:{p.port})
-              </option>
-            ))}
-          </select>
         )}
 
         {/* Admin Elevation Warning Banner */}
@@ -93,7 +177,7 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
       </div>
 
       {/* Center Connect Button */}
-      <div className="my-8 flex flex-col items-center">
+      <div className="my-6 flex flex-col items-center">
         <button
           onClick={isConnected ? onDisconnect : onConnect}
           disabled={isBusy || profiles.length === 0}
@@ -112,13 +196,19 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
         </button>
 
         {/* State label */}
-        <p className="mt-4 text-xs font-medium text-slate-400 flex items-center gap-1.5">
+        <p className="mt-3 text-xs font-medium text-slate-400 flex items-center gap-1.5">
           <Activity className="w-3.5 h-3.5 text-orange-400" />
           Status:{" "}
           <span className="capitalize font-semibold text-slate-200">
             {status.state}
           </span>
         </p>
+
+        {isConnected && status.work_profile && (
+          <div className="mt-2 text-center text-[11px] text-emerald-400 font-medium bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-800/50">
+            Dual-VPN: {status.active_profile?.name} + {status.work_profile.name}
+          </div>
+        )}
       </div>
 
       {/* Bottom Status Cards */}
@@ -146,7 +236,9 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
             <Globe className="w-4 h-4 text-sky-400 shrink-0" />
             <div className="truncate">
               <p className="text-[10px] text-slate-400 uppercase">Routing</p>
-              <p className="font-medium text-slate-200 truncate">TUN Mode</p>
+              <p className="font-medium text-slate-200 truncate">
+                {workEnabled ? "Dual TUN Split" : "TUN Mode"}
+              </p>
             </div>
           </div>
         </div>

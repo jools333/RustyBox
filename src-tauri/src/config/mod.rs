@@ -35,6 +35,10 @@ fn default_true() -> bool {
 pub struct AppConfig {
     pub version: u32,
     pub active_profile_id: Option<String>,
+    #[serde(default)]
+    pub work_profile_id: Option<String>,
+    #[serde(default)]
+    pub work_profile_enabled: bool,
     pub routing_mode: RoutingMode,
     pub default_route_action: RuleAction,
     pub rules: Vec<RoutingRule>,
@@ -58,6 +62,8 @@ impl Default for AppConfig {
         Self {
             version: 1,
             active_profile_id: None,
+            work_profile_id: None,
+            work_profile_enabled: false,
             routing_mode: RoutingMode::DomainRules,
             default_route_action: RuleAction::Vpn,
             rules: vec![

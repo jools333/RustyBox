@@ -2,8 +2,8 @@ use rustybox_lib::config::{ConfigManager, RoutingMode};
 use rustybox_lib::core::CoreManager;
 use rustybox_lib::logging::{mask_secrets, LogManager};
 use rustybox_lib::profiles::{
-    parse_profile_uri, Profile, ProfileError, ProfileManager, ProtocolConfig, ShadowsocksConfig,
-    VlessConfig,
+    parse_profile_uri, OpenvpnConfig, Profile, ProfileError, ProfileManager, ProtocolConfig,
+    ShadowsocksConfig, VlessConfig,
 };
 use rustybox_lib::routing::{RoutingManager, RoutingRule, RuleAction};
 use rustybox_lib::vpn::{ConnectionManager, ConnectionState};
@@ -191,6 +191,7 @@ fn test_scenario_07_singbox_config_generation() {
 
     let config = core_mgr.generate_singbox_config(
         &profile,
+        None,
         RoutingMode::DomainRules,
         RuleAction::Vpn,
         &[rule1, rule2],
@@ -430,6 +431,7 @@ verb 3
     let core_mgr = CoreManager::new(LogManager::default());
     let cfg = core_mgr.generate_singbox_config(
         &profile,
+        None,
         RoutingMode::GlobalVpn,
         RuleAction::Vpn,
         &[],
@@ -455,4 +457,76 @@ verb 3
         .as_str()
         .unwrap()
         .contains("CLIENT_KEY_TEST"));
+}
+
+#[tokio::test]
+async fn test_scenario_15_dual_vpn_split_tunnel_routing() {
+    let main_profile = Profile::new_shadowsocks(
+        "Main SS".to_string(),
+        "5.6.7.8".to_string(),
+        8388,
+        ShadowsocksConfig {
+            method: "aes-128-gcm".to_string(),
+            password: "test-pass".to_string(),
+        },
+    );
+
+    let work_profile = Profile::new_openvpn(
+        "Work OVPN".to_string(),
+        "195.122.253.130".to_string(),
+        12345,
+        OpenvpnConfig {
+            proto: "udp".to_string(),
+            username: Some("user".to_string()),
+            password: Some("pass".to_string()),
+            ca_cert: Some("-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----".to_string()),
+            client_cert: None,
+            client_key: None,
+            cipher: Some("AES-256-CBC".to_string()),
+            comp_lzo: true,
+            tls_auth: None,
+            tls_crypt: None,
+            auth_user_pass_required: true,
+            raw_ovpn: Some("#iroute 192.168.100.0 255.255.254.0".to_string()),
+        },
+    );
+
+    let core_mgr = CoreManager::new(LogManager::default());
+    let cfg = core_mgr.generate_singbox_config(
+        &main_profile,
+        Some(&work_profile),
+        RoutingMode::DomainRules,
+        RuleAction::Vpn,
+        &[],
+        "1.1.1.1",
+        "77.88.8.8",
+        "rustybox-tun",
+        "info",
+    );
+
+    // Verify main is in outbounds with tag "proxy"
+    let outbounds = cfg["outbounds"].as_array().expect("outbounds");
+    assert!(outbounds
+        .iter()
+        .any(|o| o["tag"] == "proxy" && o["type"] == "shadowsocks"));
+
+    // Verify work is in endpoints with tag "work"
+    let endpoints = cfg["endpoints"].as_array().expect("endpoints");
+    assert!(endpoints
+        .iter()
+        .any(|e| e["tag"] == "work" && e["type"] == "openvpn-client"));
+
+    // Verify work routes exist
+    let rules = cfg["route"]["rules"].as_array().expect("route rules");
+    assert!(rules.iter().any(|r| r["outbound"] == "work"));
+
+    // Verify sing-box syntax validator passes
+    if core_mgr.find_binary().is_some() {
+        let val_res = core_mgr.validate_config(&cfg);
+        assert!(
+            val_res.is_ok(),
+            "Dual-VPN validation failed: {:?}",
+            val_res.err()
+        );
+    }
 }

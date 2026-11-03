@@ -36,6 +36,8 @@ pub enum ConnectionState {
 pub struct ConnectionStatus {
     pub state: ConnectionState,
     pub active_profile: Option<Profile>,
+    #[serde(default)]
+    pub work_profile: Option<Profile>,
     pub connected_since: Option<DateTime<Utc>>,
     pub error_message: Option<String>,
 }
@@ -96,12 +98,24 @@ impl ConnectionManager {
 
         let connected_since = self.connected_since.read().ok().and_then(|t| *t);
         let error_message = self.last_error.read().ok().and_then(|e| e.clone());
-        let active_profile_id = self.config_manager.get_config().active_profile_id;
-        let active_profile = active_profile_id.and_then(|id| self.profile_manager.get(&id));
+        let cfg = self.config_manager.get_config();
+        let active_profile = cfg
+            .active_profile_id
+            .as_deref()
+            .and_then(|id| self.profile_manager.get(id));
+        let work_profile = if cfg.work_profile_enabled {
+            cfg.work_profile_id
+                .as_deref()
+                .filter(|id| Some(*id) != cfg.active_profile_id.as_deref())
+                .and_then(|id| self.profile_manager.get(id))
+        } else {
+            None
+        };
 
         ConnectionStatus {
             state,
             active_profile,
+            work_profile,
             connected_since,
             error_message,
         }
@@ -149,9 +163,37 @@ impl ConnectionManager {
             }
         };
 
+        let work_profile = if cfg.work_profile_enabled {
+            cfg.work_profile_id
+                .as_deref()
+                .filter(|id| Some(*id) != cfg.active_profile_id.as_deref())
+                .and_then(|id| self.profile_manager.get(id))
+        } else {
+            None
+        };
+
+        if let Some(ref work) = work_profile {
+            self.log_manager.add_log(
+                "info",
+                &format!(
+                    "Dual-VPN enabled: Primary '{}' ({:?}) + Work '{}' ({:?})",
+                    profile.name, profile.protocol, work.name, work.protocol
+                ),
+            );
+        } else if profile.only_network_resources {
+            self.log_manager.add_log(
+                "info",
+                &format!(
+                    "VPN profile '{}' is in split-tunnel mode (only corporate network resources)",
+                    profile.name
+                ),
+            );
+        }
+
         let rules = self.routing_manager.get_rules();
         let singbox_config = self.core_manager.generate_singbox_config(
             &profile,
+            work_profile.as_ref(),
             cfg.routing_mode,
             cfg.default_route_action,
             &rules,
@@ -169,10 +211,20 @@ impl ConnectionManager {
                 if let Ok(mut lock) = self.connected_since.write() {
                     *lock = Some(Utc::now());
                 }
-                self.log_manager.add_log(
-                    "info",
-                    &format!("VPN connected successfully to '{}'", profile.name),
-                );
+                if let Some(ref work) = work_profile {
+                    self.log_manager.add_log(
+                        "info",
+                        &format!(
+                            "Dual-VPN connected: Primary '{}' + Work '{}'",
+                            profile.name, work.name
+                        ),
+                    );
+                } else {
+                    self.log_manager.add_log(
+                        "info",
+                        &format!("VPN connected successfully to '{}'", profile.name),
+                    );
+                }
                 Ok(())
             }
             Err(e) => {

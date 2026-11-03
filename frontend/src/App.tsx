@@ -233,10 +233,12 @@ export const App: React.FC = () => {
           <ConnectionPanel
             status={status}
             profiles={profiles}
+            config={config}
             tunPrereqs={tunPrereqs}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
             onSelectProfile={handleSelectProfile}
+            onConfigChange={loadAllData}
           />
         )}
 

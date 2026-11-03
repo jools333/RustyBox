@@ -291,3 +291,42 @@ pub fn disable_autostart(app: tauri::AppHandle) -> Result<(), String> {
 pub fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
     crate::platform::autostart::is_enabled(&app)
 }
+
+#[tauri::command]
+pub fn set_work_profile(
+    state: State<'_, AppState>,
+    profile_id: Option<String>,
+    enabled: bool,
+) -> Result<AppConfig, String> {
+    let mut config = state.config.get_config();
+    config.work_profile_id = profile_id;
+    config.work_profile_enabled = enabled;
+    state
+        .config
+        .save_config(config.clone())
+        .map_err(|e| e.to_string())?;
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn toggle_profile_network_only(
+    state: State<'_, AppState>,
+    id: String,
+    only_network: bool,
+) -> Result<Profile, String> {
+    let updated = state
+        .profiles
+        .set_only_network_resources(&id, only_network)
+        .map_err(|e| e.to_string())?;
+
+    let mut config = state.config.get_config();
+    config.profiles = state.profiles.list();
+    let _ = state.config.save_config(config);
+
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn get_detected_work_resources() -> crate::platform::HostsEntries {
+    crate::platform::get_system_hosts_entries()
+}

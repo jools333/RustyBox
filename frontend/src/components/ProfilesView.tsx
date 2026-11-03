@@ -278,6 +278,11 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                           {ovpnCipher}
                         </span>
                       )}
+                      {p.only_network_resources && (
+                        <span className="px-1.5 py-0.2 text-[9px] font-semibold rounded bg-emerald-950 text-emerald-300 border border-emerald-800/60">
+                          ТОЛЬКО РЕСУРСЫ СЕТИ
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11px] text-slate-400 truncate mt-0.5">
                       {p.server}:{p.port}
@@ -285,7 +290,24 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
+                  <label
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer select-none px-2 py-1 rounded-lg bg-slate-800/60 hover:bg-slate-800 border border-slate-700/50"
+                    title="Использовать только для доступа к ресурсам из hosts и корпоративной сети (остальной интернет напрямую или через основной VPN)"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!p.only_network_resources}
+                      onChange={async (e) => {
+                        await api.toggleProfileNetworkOnly(p.id, e.target.checked);
+                        if (onReload) await onReload();
+                      }}
+                      className="rounded bg-slate-950 border-slate-700 text-emerald-500 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                    />
+                    <span>Только сеть</span>
+                  </label>
+
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

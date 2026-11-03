@@ -164,6 +164,9 @@ pub fn run() {
             commands::enable_autostart,
             commands::disable_autostart,
             commands::is_autostart_enabled,
+            commands::set_work_profile,
+            commands::toggle_profile_network_only,
+            commands::get_detected_work_resources,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

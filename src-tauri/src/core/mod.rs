@@ -482,31 +482,17 @@ impl CoreManager {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn generate_singbox_config(
-        &self,
+    fn add_profile_target(
         profile: &Profile,
-        routing_mode: RoutingMode,
-        default_action: RuleAction,
-        rules: &[RoutingRule],
-        remote_dns: &str,
-        _direct_dns: &str,
-        tun_interface_name: &str,
-        log_level: &str,
-    ) -> serde_json::Value {
-        let mut endpoints = Vec::new();
-        let mut outbounds = Vec::new();
-
-        outbounds.push(json!({
-            "type": "direct",
-            "tag": "direct"
-        }));
-
+        tag: &str,
+        outbounds: &mut Vec<serde_json::Value>,
+        endpoints: &mut Vec<serde_json::Value>,
+    ) {
         match &profile.protocol {
             ProtocolConfig::Vless(cfg) => {
                 let mut vless_json = json!({
                     "type": "vless",
-                    "tag": "proxy",
+                    "tag": tag,
                     "server": profile.server,
                     "server_port": profile.port,
                     "uuid": cfg.uuid,
@@ -560,7 +546,7 @@ impl CoreManager {
                     0,
                     json!({
                         "type": "shadowsocks",
-                        "tag": "proxy",
+                        "tag": tag,
                         "server": profile.server,
                         "server_port": profile.port,
                         "method": cfg.method,
@@ -576,7 +562,7 @@ impl CoreManager {
                 };
                 let mut ovpn_json = json!({
                     "type": "openvpn-client",
-                    "tag": "proxy",
+                    "tag": tag,
                     "server": profile.server,
                     "server_port": profile.port,
                     "network": network,
@@ -629,7 +615,63 @@ impl CoreManager {
 
                 endpoints.push(ovpn_json);
             }
-        };
+        }
+    }
+
+    fn add_server_bypass(
+        server: &str,
+        route_rules: &mut Vec<serde_json::Value>,
+        dns_rules: &mut Vec<serde_json::Value>,
+    ) {
+        if let Ok(ip) = server.parse::<std::net::IpAddr>() {
+            let cidr = match ip {
+                std::net::IpAddr::V4(_) => format!("{}/32", ip),
+                std::net::IpAddr::V6(_) => format!("{}/128", ip),
+            };
+            route_rules.push(json!({
+                "ip_cidr": [cidr],
+                "outbound": "direct"
+            }));
+        } else {
+            route_rules.push(json!({
+                "domain": [server],
+                "outbound": "direct"
+            }));
+            dns_rules.push(json!({
+                "domain": [server],
+                "server": "dns-direct"
+            }));
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate_singbox_config(
+        &self,
+        profile: &Profile,
+        work_profile: Option<&Profile>,
+        routing_mode: RoutingMode,
+        default_action: RuleAction,
+        rules: &[RoutingRule],
+        remote_dns: &str,
+        _direct_dns: &str,
+        tun_interface_name: &str,
+        log_level: &str,
+    ) -> serde_json::Value {
+        let mut endpoints = Vec::new();
+        let mut outbounds = Vec::new();
+
+        outbounds.push(json!({
+            "type": "direct",
+            "tag": "direct"
+        }));
+
+        // Add main profile as "proxy"
+        Self::add_profile_target(profile, "proxy", &mut outbounds, &mut endpoints);
+
+        // Add secondary work profile as "work" if present
+        if let Some(work) = work_profile {
+            Self::add_profile_target(work, "work", &mut outbounds, &mut endpoints);
+        }
 
         let mut dns_rules = Vec::new();
         let mut route_rules = Vec::new();
@@ -637,17 +679,55 @@ impl CoreManager {
         route_rules.push(json!({ "action": "sniff" }));
         route_rules.push(json!({ "port": 53, "action": "hijack-dns" }));
         route_rules.push(json!({ "protocol": "dns", "action": "hijack-dns" }));
-        route_rules.push(json!({ "ip_is_private": true, "outbound": "direct" }));
 
-        // Bypass proxy server itself to prevent routing loops
-        route_rules.push(json!({
-            "domain": [profile.server.clone()],
-            "outbound": "direct"
-        }));
-        dns_rules.push(json!({
-            "domain": [profile.server.clone()],
-            "server": "dns-direct"
-        }));
+        // Bypass proxy servers themselves to prevent routing loops
+        Self::add_server_bypass(&profile.server, &mut route_rules, &mut dns_rules);
+        if let Some(work) = work_profile {
+            Self::add_server_bypass(&work.server, &mut route_rules, &mut dns_rules);
+        }
+
+        // Configure routing for network-only / work resources if enabled
+        let work_tag_opt = if work_profile.is_some() {
+            Some("work")
+        } else if profile.only_network_resources {
+            Some("proxy")
+        } else {
+            None
+        };
+
+        if let Some(work_tag) = work_tag_opt {
+            let hosts_entries = crate::platform::get_system_hosts_entries();
+            let work_domains = hosts_entries.domains;
+            let mut work_ips = hosts_entries.ip_cidrs;
+
+            let active_work_prof = work_profile.unwrap_or(profile);
+            if let ProtocolConfig::Openvpn(ref ovpn_cfg) = active_work_prof.protocol {
+                if let Some(ref raw) = ovpn_cfg.raw_ovpn {
+                    for route in crate::profiles::extract_ovpn_routes(raw) {
+                        if !work_ips.contains(&route) {
+                            work_ips.push(route);
+                        }
+                    }
+                }
+            }
+
+            if !work_domains.is_empty() {
+                route_rules.push(json!({
+                    "domain": work_domains,
+                    "outbound": work_tag
+                }));
+                dns_rules.push(json!({
+                    "domain": work_domains,
+                    "server": "dns-direct"
+                }));
+            }
+            if !work_ips.is_empty() {
+                route_rules.push(json!({
+                    "ip_cidr": work_ips,
+                    "outbound": work_tag
+                }));
+            }
+        }
 
         match routing_mode {
             RoutingMode::GlobalVpn => {}
@@ -677,13 +757,21 @@ impl CoreManager {
             }
         }
 
-        let final_outbound = match routing_mode {
-            RoutingMode::GlobalVpn => "proxy",
-            RoutingMode::GlobalDirect => "direct",
-            RoutingMode::DomainRules => match default_action {
-                RuleAction::Vpn => "proxy",
-                RuleAction::Direct => "direct",
-            },
+        // Private IP direct routing comes AFTER specific work resource rules
+        // so that corporate private IPs route to the work tunnel while home/LAN stays direct.
+        route_rules.push(json!({ "ip_is_private": true, "outbound": "direct" }));
+
+        let final_outbound = if profile.only_network_resources && work_profile.is_none() {
+            "direct"
+        } else {
+            match routing_mode {
+                RoutingMode::GlobalVpn => "proxy",
+                RoutingMode::GlobalDirect => "direct",
+                RoutingMode::DomainRules => match default_action {
+                    RuleAction::Vpn => "proxy",
+                    RuleAction::Direct => "direct",
+                },
+            }
         };
 
         let final_dns = if final_outbound == "direct" {
@@ -1117,6 +1205,7 @@ mod tests {
 
         let config = core_mgr.generate_singbox_config(
             &profile,
+            None,
             RoutingMode::DomainRules,
             RuleAction::Vpn,
             &[rule1, rule2],
@@ -1164,6 +1253,7 @@ mod tests {
 
         let config = core_mgr.generate_singbox_config(
             &profile,
+            None,
             RoutingMode::GlobalVpn,
             RuleAction::Vpn,
             &[],
@@ -1318,6 +1408,7 @@ mod tests {
 
         let cfg = core_mgr.generate_singbox_config(
             &profile,
+            None,
             RoutingMode::GlobalVpn,
             RuleAction::Vpn,
             &[],
@@ -1350,5 +1441,89 @@ mod tests {
         let outbounds = cfg["outbounds"].as_array().expect("Should have outbounds");
         assert_eq!(outbounds.len(), 1);
         assert_eq!(outbounds[0]["tag"], "direct");
+    }
+
+    #[test]
+    fn test_generate_dual_vpn_singbox_config() {
+        let log_mgr = LogManager::default();
+        let core_mgr = CoreManager::new(log_mgr);
+
+        let vless_cfg = VlessConfig {
+            uuid: "b831381d-6324-4d53-ad4f-8cda98b3f811".to_string(),
+            flow: Some("xtls-rprx-vision".to_string()),
+            network: Some("tcp".to_string()),
+            tls: true,
+            sni: Some("main-vpn.com".to_string()),
+            fingerprint: Some("chrome".to_string()),
+            reality: false,
+            public_key: None,
+            short_id: None,
+        };
+        let main_profile = Profile::new_vless(
+            "Main VLESS".to_string(),
+            "1.2.3.4".to_string(),
+            443,
+            vless_cfg,
+        );
+
+        let work_profile = Profile::new_openvpn(
+            "Work OpenVPN".to_string(),
+            "195.122.253.130".to_string(),
+            12345,
+            crate::profiles::OpenvpnConfig {
+                proto: "udp".to_string(),
+                username: Some("workuser".to_string()),
+                password: Some("secret".to_string()),
+                ca_cert: Some(
+                    "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----".to_string(),
+                ),
+                client_cert: None,
+                client_key: None,
+                cipher: Some("AES-256-CBC".to_string()),
+                comp_lzo: true,
+                tls_auth: None,
+                tls_crypt: None,
+                auth_user_pass_required: true,
+                raw_ovpn: Some("iroute 192.168.100.0 255.255.254.0".to_string()),
+            },
+        );
+
+        let cfg = core_mgr.generate_singbox_config(
+            &main_profile,
+            Some(&work_profile),
+            RoutingMode::DomainRules,
+            RuleAction::Vpn,
+            &[],
+            "1.1.1.1",
+            "77.88.8.8",
+            "rustybox-tun",
+            "info",
+        );
+
+        // Verify outbounds contains main "proxy"
+        let outbounds = cfg["outbounds"].as_array().expect("outbounds");
+        assert!(outbounds
+            .iter()
+            .any(|o| o["tag"] == "proxy" && o["type"] == "vless"));
+        assert!(outbounds.iter().any(|o| o["tag"] == "direct"));
+
+        // Verify endpoints contains work "work"
+        let endpoints = cfg["endpoints"].as_array().expect("endpoints");
+        assert_eq!(endpoints.len(), 1);
+        assert_eq!(endpoints[0]["tag"], "work");
+        assert_eq!(endpoints[0]["type"], "openvpn-client");
+
+        // Verify routing rules contains work routing
+        let rules = cfg["route"]["rules"].as_array().expect("route rules");
+        assert!(rules.iter().any(|r| r["outbound"] == "work"));
+
+        if core_mgr.find_binary().is_some() {
+            let val_res = core_mgr.validate_config(&cfg);
+            assert!(
+                val_res.is_ok(),
+                "Dual-VPN validation failed: {:?}",
+                val_res.err()
+            );
+        }
     }
 }

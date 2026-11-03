@@ -1,4 +1,9 @@
 pub mod autostart;
+pub mod hosts;
+
+pub use hosts::{
+    get_system_hosts_entries, get_system_hosts_path, parse_hosts_content, HostsEntries,
+};
 
 pub fn get_os_info() -> String {
     #[cfg(target_os = "windows")]

@@ -79,6 +79,8 @@ pub struct Profile {
     pub port: u16,
     pub protocol: ProtocolConfig,
     pub latency_ms: Option<u64>,
+    #[serde(default)]
+    pub only_network_resources: bool,
 }
 
 impl Profile {
@@ -90,6 +92,7 @@ impl Profile {
             port,
             protocol: ProtocolConfig::Vless(config),
             latency_ms: None,
+            only_network_resources: false,
         }
     }
 
@@ -106,6 +109,7 @@ impl Profile {
             port,
             protocol: ProtocolConfig::Shadowsocks(config),
             latency_ms: None,
+            only_network_resources: false,
         }
     }
 
@@ -117,6 +121,7 @@ impl Profile {
             port,
             protocol: ProtocolConfig::Openvpn(config),
             latency_ms: None,
+            only_network_resources: false,
         }
     }
 }
@@ -220,6 +225,7 @@ fn parse_vless_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         port,
         protocol: ProtocolConfig::Vless(vless_config),
         latency_ms: None,
+        only_network_resources: false,
     })
 }
 
@@ -339,6 +345,7 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
             port,
             protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
             latency_ms: None,
+            only_network_resources: false,
         });
     }
 
@@ -373,6 +380,7 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         port,
         protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
         latency_ms: None,
+        only_network_resources: false,
     })
 }
 
@@ -717,7 +725,43 @@ pub fn parse_ovpn(
         port,
         protocol: ProtocolConfig::Openvpn(config),
         latency_ms: None,
+        only_network_resources: false,
     })
+}
+
+/// Extracts any IPv4 routes specified in `route` or `iroute` directives in an OpenVPN config.
+pub fn extract_ovpn_routes(raw_ovpn: &str) -> Vec<String> {
+    let mut routes = Vec::new();
+    for line in raw_ovpn.lines() {
+        let clean = line
+            .trim()
+            .trim_start_matches('#')
+            .trim_start_matches(';')
+            .trim();
+        let tokens: Vec<&str> = clean.split_whitespace().collect();
+        if tokens.len() >= 2
+            && (tokens[0].eq_ignore_ascii_case("route") || tokens[0].eq_ignore_ascii_case("iroute"))
+        {
+            let ip_str = tokens[1];
+            if let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>() {
+                if tokens.len() >= 3 {
+                    if let Ok(mask) = tokens[2].parse::<std::net::Ipv4Addr>() {
+                        let prefix = u32::from_be_bytes(mask.octets()).count_ones();
+                        let cidr = format!("{}/{}", ip, prefix);
+                        if !routes.contains(&cidr) {
+                            routes.push(cidr);
+                        }
+                        continue;
+                    }
+                }
+                let cidr = format!("{}/32", ip);
+                if !routes.contains(&cidr) {
+                    routes.push(cidr);
+                }
+            }
+        }
+    }
+    routes
 }
 
 pub fn parse_ovpn_file(path: &std::path::Path) -> Result<Profile, ProfileError> {
@@ -795,6 +839,23 @@ impl ProfileManager {
             Ok(())
         } else {
             Err(ProfileError::NotFound(profile.id))
+        }
+    }
+
+    pub fn set_only_network_resources(
+        &self,
+        id: &str,
+        only_network: bool,
+    ) -> Result<Profile, ProfileError> {
+        let mut list = self
+            .profiles
+            .write()
+            .map_err(|_| ProfileError::NotFound("Lock error".to_string()))?;
+        if let Some(existing) = list.iter_mut().find(|p| p.id == id) {
+            existing.only_network_resources = only_network;
+            Ok(existing.clone())
+        } else {
+            Err(ProfileError::NotFound(id.to_string()))
         }
     }
 

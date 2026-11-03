@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.12";
+export const APP_VERSION = "0.1.13";
 
 export type ConnectionState = "disconnected" | "starting" | "connected" | "stopping" | "error";
 
@@ -46,6 +46,7 @@ export interface Profile {
   port: number;
   protocol: ProtocolConfig;
   latency_ms?: number;
+  only_network_resources?: boolean;
 }
 
 export type RuleAction = "DIRECT" | "VPN";
@@ -61,8 +62,14 @@ export interface RoutingRule {
 export interface ConnectionStatus {
   state: ConnectionState;
   active_profile: Profile | null;
+  work_profile?: Profile | null;
   connected_since: string | null;
   error_message: string | null;
+}
+
+export interface HostsEntries {
+  domains: string[];
+  ip_cidrs: string[];
 }
 
 export interface CoreStatus {
@@ -88,6 +95,8 @@ export interface LogEntry {
 export interface AppConfig {
   version: number;
   active_profile_id: string | null;
+  work_profile_id?: string | null;
+  work_profile_enabled?: boolean;
   routing_mode: RoutingMode;
   default_route_action: RuleAction;
   rules: RoutingRule[];

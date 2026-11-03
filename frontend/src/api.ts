@@ -328,6 +328,46 @@ export const api = {
     if (!isTauri()) return;
     return invoke("relaunch_as_admin");
   },
+
+  setWorkProfile: async (profileId: string | null, enabled: boolean): Promise<AppConfig> => {
+    if (!isTauri()) {
+      return {
+        version: 1,
+        active_profile_id: mockProfiles[0].id,
+        work_profile_id: profileId,
+        work_profile_enabled: enabled,
+        routing_mode: "domain_rules",
+        default_route_action: "VPN",
+        rules: mockRules,
+        profiles: mockProfiles,
+        remote_dns: "1.1.1.1",
+        direct_dns: "local",
+        close_to_tray: true,
+        singbox_path: null,
+        tun_interface_name: "rustybox-tun",
+        log_level: "info",
+      };
+    }
+    return invoke<AppConfig>("set_work_profile", { profileId, enabled });
+  },
+
+  toggleProfileNetworkOnly: async (id: string, onlyNetwork: boolean): Promise<Profile> => {
+    if (!isTauri()) {
+      const p = mockProfiles.find((item) => item.id === id) || mockProfiles[0];
+      return { ...p, only_network_resources: onlyNetwork };
+    }
+    return invoke<Profile>("toggle_profile_network_only", { id, onlyNetwork });
+  },
+
+  getDetectedWorkResources: async (): Promise<{ domains: string[]; ip_cidrs: string[] }> => {
+    if (!isTauri()) {
+      return {
+        domains: ["forgejo.k8s-dev.local", "plane.k8s-dev.local", "portal.k8s-dev.local"],
+        ip_cidrs: ["192.168.102.102/32", "92.101.253.149/32", "192.168.100.211/32"],
+      };
+    }
+    return invoke<{ domains: string[]; ip_cidrs: string[] }>("get_detected_work_resources");
+  },
 };
 
 export type { Update, DownloadEvent };
