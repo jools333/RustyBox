@@ -440,7 +440,10 @@ impl CoreManager {
         if let Some(parent) = binary.parent() {
             cmd.current_dir(parent);
         }
-        cmd.arg("version");
+        cmd.arg("version")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
@@ -848,7 +851,12 @@ impl CoreManager {
         if let Some(parent) = binary.parent() {
             cmd.current_dir(parent);
         }
-        cmd.arg("check").arg("-c").arg(&temp_config);
+        cmd.arg("check")
+            .arg("-c")
+            .arg(&temp_config)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
@@ -938,6 +946,7 @@ impl CoreManager {
         cmd.arg("run")
             .arg("-c")
             .arg(&config_path)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
@@ -1128,19 +1137,34 @@ impl CoreManager {
                         handlerRoutine: Option<extern "system" fn(u32) -> i32>,
                         add: i32,
                     ) -> i32;
+                    fn GetStdHandle(nStdHandle: u32) -> isize;
+                    fn SetStdHandle(nStdHandle: u32, hHandle: isize) -> i32;
                 }
                 extern "system" fn ignore_console_ctrl(_: u32) -> i32 {
                     1 // TRUE: event handled, prevents Windows from terminating the parent process
                 }
                 const CTRL_BREAK_EVENT: u32 = 1;
+                const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6;
+                const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5;
+                const STD_ERROR_HANDLE: u32 = 0xFFFFFFF4;
+
                 // Signal sing-box for graceful teardown (routes restore and Wintun adapter cleanup)
                 unsafe {
+                    let h_in = GetStdHandle(STD_INPUT_HANDLE);
+                    let h_out = GetStdHandle(STD_OUTPUT_HANDLE);
+                    let h_err = GetStdHandle(STD_ERROR_HANDLE);
+
                     if AttachConsole(proc.pid) != 0 {
                         SetConsoleCtrlHandler(Some(ignore_console_ctrl), 1);
                         // Send CTRL_BREAK specifically to the child's process group (proc.pid)
                         GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
                         FreeConsole();
                         SetConsoleCtrlHandler(Some(ignore_console_ctrl), 0);
+
+                        // FreeConsole invalidates std handles for the process. Restore them:
+                        SetStdHandle(STD_INPUT_HANDLE, h_in);
+                        SetStdHandle(STD_OUTPUT_HANDLE, h_out);
+                        SetStdHandle(STD_ERROR_HANDLE, h_err);
                     } else {
                         GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
                     }

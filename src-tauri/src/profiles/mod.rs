@@ -420,6 +420,52 @@ fn tokenize_ovpn_line(line: &str) -> Vec<String> {
 /// If `base_dir` is provided and relative file paths are specified in `ca`, `cert`, `key`,
 /// etc., they will be read from `base_dir` and inlined into the resulting profile.
 #[allow(clippy::collapsible_match)]
+fn load_ovpn_file_ref(
+    file_arg: &str,
+    base_dir: Option<&std::path::Path>,
+    file_desc: &str,
+) -> Result<String, ProfileError> {
+    if let Some(base) = base_dir {
+        let path = if std::path::Path::new(file_arg).is_relative() {
+            base.join(file_arg)
+        } else {
+            std::path::PathBuf::from(file_arg)
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(data) => return Ok(data),
+            Err(e) => {
+                return Err(ProfileError::InvalidOvpn(format!(
+                    "{} file '{}' could not be read: {}",
+                    file_desc,
+                    path.display(),
+                    e
+                )));
+            }
+        }
+    }
+
+    let p = std::path::Path::new(file_arg);
+    if p.is_file() {
+        match std::fs::read_to_string(p) {
+            Ok(data) => return Ok(data),
+            Err(e) => {
+                return Err(ProfileError::InvalidOvpn(format!(
+                    "{} file '{}' could not be read: {}",
+                    file_desc,
+                    p.display(),
+                    e
+                )));
+            }
+        }
+    }
+
+    Err(ProfileError::InvalidOvpn(format!(
+        "External {} file '{}' referenced in .ovpn could not be found. Please import the .ovpn file using the native file picker.",
+        file_desc,
+        file_arg
+    )))
+}
+
 pub fn parse_ovpn(
     content: &str,
     base_dir: Option<&std::path::Path>,
@@ -594,101 +640,28 @@ pub fn parse_ovpn(
                     }
                 }
             }
-            "ca" => {
-                if ca_cert.is_none() && tokens.len() >= 2 {
-                    let file_arg = &tokens[1];
-                    if let Some(base) = base_dir {
-                        let path = if std::path::Path::new(file_arg).is_relative() {
-                            base.join(file_arg)
-                        } else {
-                            std::path::PathBuf::from(file_arg)
-                        };
-                        match std::fs::read_to_string(&path) {
-                            Ok(cert_data) => ca_cert = Some(cert_data),
-                            Err(e) => {
-                                return Err(ProfileError::InvalidOvpn(format!(
-                                    "CA certificate file '{}' could not be read: {}",
-                                    path.display(),
-                                    e
-                                )));
-                            }
-                        }
-                    }
-                }
+            "ca" if ca_cert.is_none() && tokens.len() >= 2 => {
+                ca_cert = Some(load_ovpn_file_ref(&tokens[1], base_dir, "CA certificate")?);
             }
-            "cert" => {
-                if client_cert.is_none() && tokens.len() >= 2 {
-                    let file_arg = &tokens[1];
-                    if let Some(base) = base_dir {
-                        let path = if std::path::Path::new(file_arg).is_relative() {
-                            base.join(file_arg)
-                        } else {
-                            std::path::PathBuf::from(file_arg)
-                        };
-                        match std::fs::read_to_string(&path) {
-                            Ok(cert_data) => client_cert = Some(cert_data),
-                            Err(e) => {
-                                return Err(ProfileError::InvalidOvpn(format!(
-                                    "Client certificate file '{}' could not be read: {}",
-                                    path.display(),
-                                    e
-                                )));
-                            }
-                        }
-                    }
-                }
+            "cert" if client_cert.is_none() && tokens.len() >= 2 => {
+                client_cert = Some(load_ovpn_file_ref(
+                    &tokens[1],
+                    base_dir,
+                    "Client certificate",
+                )?);
             }
-            "key" => {
-                if client_key.is_none() && tokens.len() >= 2 {
-                    let file_arg = &tokens[1];
-                    if let Some(base) = base_dir {
-                        let path = if std::path::Path::new(file_arg).is_relative() {
-                            base.join(file_arg)
-                        } else {
-                            std::path::PathBuf::from(file_arg)
-                        };
-                        match std::fs::read_to_string(&path) {
-                            Ok(key_data) => client_key = Some(key_data),
-                            Err(e) => {
-                                return Err(ProfileError::InvalidOvpn(format!(
-                                    "Client private key file '{}' could not be read: {}",
-                                    path.display(),
-                                    e
-                                )));
-                            }
-                        }
-                    }
-                }
+            "key" if client_key.is_none() && tokens.len() >= 2 => {
+                client_key = Some(load_ovpn_file_ref(
+                    &tokens[1],
+                    base_dir,
+                    "Client private key",
+                )?);
             }
-            "tls-auth" => {
-                if tls_auth.is_none() && tokens.len() >= 2 {
-                    let file_arg = &tokens[1];
-                    if let Some(base) = base_dir {
-                        let path = if std::path::Path::new(file_arg).is_relative() {
-                            base.join(file_arg)
-                        } else {
-                            std::path::PathBuf::from(file_arg)
-                        };
-                        if let Ok(key_data) = std::fs::read_to_string(&path) {
-                            tls_auth = Some(key_data);
-                        }
-                    }
-                }
+            "tls-auth" if tls_auth.is_none() && tokens.len() >= 2 => {
+                tls_auth = Some(load_ovpn_file_ref(&tokens[1], base_dir, "TLS Auth key")?);
             }
-            "tls-crypt" => {
-                if tls_crypt.is_none() && tokens.len() >= 2 {
-                    let file_arg = &tokens[1];
-                    if let Some(base) = base_dir {
-                        let path = if std::path::Path::new(file_arg).is_relative() {
-                            base.join(file_arg)
-                        } else {
-                            std::path::PathBuf::from(file_arg)
-                        };
-                        if let Ok(key_data) = std::fs::read_to_string(&path) {
-                            tls_crypt = Some(key_data);
-                        }
-                    }
-                }
+            "tls-crypt" if tls_crypt.is_none() && tokens.len() >= 2 => {
+                tls_crypt = Some(load_ovpn_file_ref(&tokens[1], base_dir, "TLS Crypt key")?);
             }
             _ => {}
         }

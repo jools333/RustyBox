@@ -1,7 +1,7 @@
 use crate::config::ConfigManager;
 use crate::core::CoreManager;
 use crate::logging::LogManager;
-use crate::profiles::{Profile, ProfileManager};
+use crate::profiles::{Profile, ProfileManager, ProtocolConfig};
 use crate::routing::RoutingManager;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -171,6 +171,30 @@ impl ConnectionManager {
         } else {
             None
         };
+
+        // Validate OpenVPN certificate readiness
+        if let ProtocolConfig::Openvpn(ref ovpn) = profile.protocol {
+            if ovpn.ca_cert.is_none() && ovpn.tls_auth.is_none() && ovpn.tls_crypt.is_none() {
+                let err_msg = format!(
+                    "OpenVPN profile '{}' is missing CA certificate. Please re-import the .ovpn file using the 'Import .ovpn' button.",
+                    profile.name
+                );
+                self.set_error(&err_msg);
+                return Err(VpnError::Core(err_msg));
+            }
+        }
+        if let Some(ref work) = work_profile {
+            if let ProtocolConfig::Openvpn(ref ovpn) = work.protocol {
+                if ovpn.ca_cert.is_none() && ovpn.tls_auth.is_none() && ovpn.tls_crypt.is_none() {
+                    let err_msg = format!(
+                        "Work OpenVPN profile '{}' is missing CA certificate. Please re-import the .ovpn file using the 'Import .ovpn' button.",
+                        work.name
+                    );
+                    self.set_error(&err_msg);
+                    return Err(VpnError::Core(err_msg));
+                }
+            }
+        }
 
         if let Some(ref work) = work_profile {
             self.log_manager.add_log(

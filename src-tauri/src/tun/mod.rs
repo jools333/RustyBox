@@ -192,6 +192,9 @@ impl TunManager {
                         interface_name
                     ),
                 ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
                 .creation_flags(CREATE_NO_WINDOW)
                 .status();
 
@@ -199,6 +202,7 @@ impl TunManager {
             // When sing-box is not actively connected, any sing-tun adapter is orphaned.
             if let Ok(output) = std::process::Command::new("pnputil")
                 .args(["/enum-devices", "/class", "Net"])
+                .stdin(std::process::Stdio::null())
                 .creation_flags(CREATE_NO_WINDOW)
                 .output()
             {
@@ -211,6 +215,9 @@ impl TunManager {
                 for instance in &stale_instances {
                     let _ = std::process::Command::new("pnputil")
                         .args(["/remove-device", instance])
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
                         .creation_flags(CREATE_NO_WINDOW)
                         .status();
                 }
@@ -223,6 +230,7 @@ impl TunManager {
                         for inst in &stale_instances {
                             if let Ok(check) = std::process::Command::new("pnputil")
                                 .args(["/enum-devices", "/instanceid", inst])
+                                .stdin(std::process::Stdio::null())
                                 .creation_flags(CREATE_NO_WINDOW)
                                 .output()
                             {

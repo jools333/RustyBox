@@ -60,6 +60,16 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   const workEnabled = config?.work_profile_enabled ?? false;
   const workProfileId = config?.work_profile_id ?? null;
 
+  const activeProfile = status.active_profile;
+  const workProfile = workEnabled ? profiles.find((p) => p.id === workProfileId) : null;
+  const isProfileMissingCerts = (p?: Profile | null) => {
+    if (!p || p.protocol.type !== "Openvpn") return false;
+    const cfg = p.protocol as any;
+    return !cfg.ca_cert && !cfg.tls_auth && !cfg.tls_crypt;
+  };
+  const activeMissingCerts = isProfileMissingCerts(activeProfile);
+  const workMissingCerts = isProfileMissingCerts(workProfile);
+
   const handleToggleWork = async (enabled: boolean) => {
     // If enabling and no work profile set, pick the first profile that isn't the primary one
     let targetId = workProfileId;
@@ -153,6 +163,20 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {(activeMissingCerts || workMissingCerts) && (
+          <div className="mt-3 p-3 bg-rose-950/60 border border-rose-800/80 rounded-xl flex items-start gap-2.5 text-rose-300 text-xs">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+            <div className="flex-1">
+              <span className="font-semibold block text-rose-200">
+                {activeMissingCerts
+                  ? `Профиль '${activeProfile?.name}' не содержит сертификата CA`
+                  : `Рабочий профиль '${workProfile?.name}' не содержит сертификата CA`}
+              </span>
+              Перейдите во вкладку Профили и импортируйте .ovpn заново через кнопку «Import .ovpn».
+            </div>
           </div>
         )}
 

@@ -144,6 +144,7 @@ pub fn run() {
             commands::add_profile,
             commands::import_profile_uri,
             commands::import_ovpn_file,
+            commands::pick_ovpn_file,
             commands::import_ovpn_content,
             commands::update_profile,
             commands::delete_profile,

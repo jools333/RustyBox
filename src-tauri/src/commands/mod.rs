@@ -82,6 +82,11 @@ pub fn import_ovpn_file(
     Ok(profile)
 }
 
+#[tauri::command]
+pub fn pick_ovpn_file() -> Result<Option<String>, String> {
+    Ok(crate::platform::pick_ovpn_file_dialog().map(|p| p.display().to_string()))
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn import_ovpn_content(

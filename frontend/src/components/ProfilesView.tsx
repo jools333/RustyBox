@@ -58,6 +58,31 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
     }
   };
 
+  const handleImportOvpnClick = async () => {
+    if (api.isTauri()) {
+      try {
+        const filePath = await api.pickOvpnFile();
+        if (filePath) {
+          try {
+            setOvpnError(null);
+            await api.importOvpnFile(filePath);
+            if (onReload) await onReload();
+          } catch (err: any) {
+            const msg = err?.message || String(err);
+            setOvpnFilePath(filePath);
+            setOvpnContent("");
+            setOvpnError(msg);
+            setShowOvpnModal(true);
+          }
+        }
+        return;
+      } catch (e) {
+        console.warn("Native file picker failed, falling back to browser picker:", e);
+      }
+    }
+    fileInputRef.current?.click();
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -190,7 +215,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
       {/* Action Buttons */}
       <div className="flex gap-2">
         <button
-          onClick={() => fileInputRef.current?.click()}
+          onClick={handleImportOvpnClick}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-amber-600/20 transition-all"
         >
           <FileText className="w-3.5 h-3.5" />
@@ -281,6 +306,11 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                       {p.only_network_resources && (
                         <span className="px-1.5 py-0.2 text-[9px] font-semibold rounded bg-emerald-950 text-emerald-300 border border-emerald-800/60">
                           ТОЛЬКО РЕСУРСЫ СЕТИ
+                        </span>
+                      )}
+                      {isOpenvpn && !(p.protocol as OpenvpnConfig).ca_cert && !(p.protocol as OpenvpnConfig).tls_auth && !(p.protocol as OpenvpnConfig).tls_crypt && (
+                        <span className="px-1.5 py-0.2 text-[9px] font-semibold rounded bg-rose-950 text-rose-300 border border-rose-800/60" title="Требуется CA сертификат. Переимпортируйте профиль через кнопку Import .ovpn">
+                          НЕТ CA СЕРТИФИКАТА
                         </span>
                       )}
                     </div>

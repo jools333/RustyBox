@@ -168,6 +168,11 @@ export const api = {
     });
   },
 
+  pickOvpnFile: async (): Promise<string | null> => {
+    if (!isTauri()) return null;
+    return invoke<string | null>("pick_ovpn_file");
+  },
+
   importOvpnContent: async (
     content: string,
     name?: string,
@@ -368,6 +373,10 @@ export const api = {
     }
     return invoke<{ domains: string[]; ip_cidrs: string[] }>("get_detected_work_resources");
   },
+
+  isTauri: (): boolean => isTauri(),
 };
+
+export { isTauri };
 
 export type { Update, DownloadEvent };
