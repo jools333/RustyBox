@@ -91,14 +91,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setUpdateError(null);
 
     try {
-      // 1. Ensure VPN is disconnected before replacing binaries
-      await api.disconnectVpn();
-
-      // 2. Download and install
+      // 1. Download package while VPN is still active (avoids losing connectivity to GitHub)
       let totalLength = 0;
       let downloadedLength = 0;
 
-      await currentUpdate.downloadAndInstall((event) => {
+      await currentUpdate.download((event) => {
         if (event.event === "Started") {
           totalLength = event.data.contentLength || 0;
         } else if (event.event === "Progress") {
@@ -114,7 +111,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       });
 
       setUpdateStatus("ready");
-      // 3. Relaunch application
+
+      // 2. Disconnect VPN right before applying installer to release wintun.dll and sing-box handles
+      try {
+        await api.disconnectVpn();
+      } catch (e) {
+        console.warn("Error disconnecting VPN before update install:", e);
+      }
+
+      // 3. Install update (on Windows, this launches the installer and exits cleanly; on Linux/macOS applies in-place)
+      await currentUpdate.install();
+
+      // 4. Relaunch application (for Linux/macOS)
       await api.relaunchApp();
     } catch (err: any) {
       setUpdateStatus("error");

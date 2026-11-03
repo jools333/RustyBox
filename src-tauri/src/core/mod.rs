@@ -1129,14 +1129,18 @@ impl CoreManager {
                         add: i32,
                     ) -> i32;
                 }
+                extern "system" fn ignore_console_ctrl(_: u32) -> i32 {
+                    1 // TRUE: event handled, prevents Windows from terminating the parent process
+                }
                 const CTRL_BREAK_EVENT: u32 = 1;
                 // Signal sing-box for graceful teardown (routes restore and Wintun adapter cleanup)
                 unsafe {
                     if AttachConsole(proc.pid) != 0 {
-                        SetConsoleCtrlHandler(None, 1);
-                        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+                        SetConsoleCtrlHandler(Some(ignore_console_ctrl), 1);
+                        // Send CTRL_BREAK specifically to the child's process group (proc.pid)
+                        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
                         FreeConsole();
-                        SetConsoleCtrlHandler(None, 0);
+                        SetConsoleCtrlHandler(Some(ignore_console_ctrl), 0);
                     } else {
                         GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
                     }
