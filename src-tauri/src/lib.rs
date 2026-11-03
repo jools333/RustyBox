@@ -100,6 +100,35 @@ pub fn run() {
                 debug_log("window.log", "NO main window found!\n");
             }
 
+            // Auto-connect to VPN on startup if enabled
+            let cfg = app_state.config.get_config();
+            if cfg.auto_connect {
+                let active_id = cfg.active_profile_id.clone().or_else(|| {
+                    let first = app_state.profiles.list().first().map(|p| p.id.clone());
+                    if let Some(ref fid) = first {
+                        let _ = app_state.config.update(|c| {
+                            c.active_profile_id = Some(fid.clone());
+                        });
+                    }
+                    first
+                });
+
+                if let Some(profile_id) = active_id {
+                    if app_state.profiles.get(&profile_id).is_some() {
+                        tracing::info!(
+                            "Auto-connecting to VPN profile '{}' on startup...",
+                            profile_id
+                        );
+                        let vpn = app_state.vpn.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = vpn.connect().await {
+                                tracing::error!("Auto-connect on launch failed: {}", e);
+                            }
+                        });
+                    }
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

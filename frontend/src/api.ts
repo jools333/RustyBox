@@ -212,6 +212,7 @@ export const api = {
         log_level: "info",
         auto_check_updates: true,
         auto_start: true,
+        auto_connect: false,
       };
     }
     return invoke<AppConfig>("get_config");

@@ -49,6 +49,8 @@ pub struct AppConfig {
     pub auto_check_updates: bool,
     #[serde(default)]
     pub auto_start: bool,
+    #[serde(default)]
+    pub auto_connect: bool,
 }
 
 impl Default for AppConfig {
@@ -71,6 +73,7 @@ impl Default for AppConfig {
             log_level: "info".to_string(),
             auto_check_updates: true,
             auto_start: false,
+            auto_connect: false,
         }
     }
 }
@@ -169,6 +172,7 @@ mod tests {
         let mgr = ConfigManager::new(path.clone());
         let mut cfg = mgr.get_config();
         cfg.close_to_tray = false;
+        cfg.auto_connect = true;
         cfg.remote_dns = "8.8.8.8".to_string();
         cfg.auto_start = true;
         mgr.save_config(cfg.clone()).unwrap();
@@ -176,6 +180,7 @@ mod tests {
         let mgr2 = ConfigManager::new(path);
         let loaded = mgr2.get_config();
         assert!(!loaded.close_to_tray);
+        assert!(loaded.auto_connect);
         assert_eq!(loaded.remote_dns, "8.8.8.8");
         assert!(loaded.auto_start);
     }

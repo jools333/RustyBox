@@ -33,6 +33,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     config.auto_check_updates !== false
   );
   const [autoStart, setAutoStart] = useState(config.auto_start || false);
+  const [autoConnect, setAutoConnect] = useState(config.auto_connect ?? false);
   const [tunName, setTunName] = useState(config.tun_interface_name);
   const [remoteDns, setRemoteDns] = useState(config.remote_dns);
   const [directDns, setDirectDns] = useState(config.direct_dns);
@@ -127,6 +128,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       close_to_tray: closeToTray,
       auto_check_updates: autoCheckUpdates,
       auto_start: autoStart,
+      auto_connect: autoConnect,
       tun_interface_name: tunName,
       remote_dns: remoteDns,
       direct_dns: directDns,
@@ -341,6 +343,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* Settings Form */}
       <div className="space-y-3 text-xs">
+        {/* Auto-connect on startup */}
+        <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
+          <div>
+            <label className="font-medium text-slate-200 block">
+              Auto-connect on Startup
+            </label>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              Automatically connect to the active VPN profile when application starts
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            checked={autoConnect}
+            onChange={(e) => setAutoConnect(e.target.checked)}
+            className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-orange-600 focus:ring-0 cursor-pointer"
+          />
+        </div>
+
         {/* Close to tray */}
         <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
           <div>

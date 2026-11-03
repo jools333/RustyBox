@@ -338,3 +338,44 @@ async fn test_scenario_12_stop_core_when_not_running() {
         Err(rustybox_lib::core::CoreError::NotRunning)
     ));
 }
+
+// 13. Scenario 13: Auto-connect setting persistence and backwards compatibility
+#[test]
+fn test_scenario_13_auto_connect_setting() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+
+    // 1. AppConfig default has auto_connect = false
+    let config_mgr = ConfigManager::new(config_path.clone());
+    assert!(!config_mgr.get_config().auto_connect);
+
+    // 2. Backward compatibility: JSON without auto_connect should default to false
+    let legacy_json = r#"{
+        "version": 1,
+        "active_profile_id": null,
+        "routing_mode": "domain_rules",
+        "default_route_action": "vpn",
+        "rules": [],
+        "profiles": [],
+        "remote_dns": "1.1.1.1",
+        "direct_dns": "77.88.8.8",
+        "close_to_tray": true,
+        "singbox_path": null,
+        "tun_interface_name": "rustybox-tun",
+        "log_level": "info"
+    }"#;
+    let legacy_path = dir.path().join("legacy.json");
+    std::fs::write(&legacy_path, legacy_json).unwrap();
+    let legacy_mgr = ConfigManager::new(legacy_path);
+    assert!(!legacy_mgr.get_config().auto_connect);
+
+    // 3. Enable auto_connect and save
+    config_mgr
+        .update(|c| {
+            c.auto_connect = true;
+        })
+        .unwrap();
+
+    let reloaded = ConfigManager::new(config_path);
+    assert!(reloaded.get_config().auto_connect);
+}

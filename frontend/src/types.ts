@@ -84,4 +84,5 @@ export interface AppConfig {
   log_level: string;
   auto_check_updates?: boolean;
   auto_start?: boolean;
+  auto_connect?: boolean;
 }
