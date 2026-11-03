@@ -195,29 +195,91 @@ impl TunManager {
                 .creation_flags(CREATE_NO_WINDOW)
                 .status();
 
-            // 2. Scan pnputil for DISCONNECTED/orphaned Wintun devices and remove them.
-            // NEVER remove working/active adapters (which might belong to active VPNs or current session).
+            // 2. Scan pnputil for sing-tun / Wintun devices and remove stale instances.
+            // When sing-box is not actively connected, any sing-tun adapter is orphaned.
             if let Ok(output) = std::process::Command::new("pnputil")
                 .args(["/enum-devices", "/class", "Net"])
                 .creation_flags(CREATE_NO_WINDOW)
                 .output()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let stale_instances = parse_disconnected_wintun_instances(&stdout);
+                let mut stale_instances = parse_singbox_wintun_instances(&stdout);
+                if stale_instances.is_empty() {
+                    stale_instances = parse_disconnected_wintun_instances(&stdout);
+                }
                 let removed_any = !stale_instances.is_empty();
-                for instance in stale_instances {
+                for instance in &stale_instances {
                     let _ = std::process::Command::new("pnputil")
-                        .args(["/remove-device", &instance])
+                        .args(["/remove-device", instance])
                         .creation_flags(CREATE_NO_WINDOW)
                         .status();
                 }
-                // If any device was removed, give Windows PnP manager a brief moment to settle
+                // If any device was removed, wait until Windows PnP manager confirms removal (up to 2.5s)
                 if removed_any {
-                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    let deadline =
+                        std::time::Instant::now() + std::time::Duration::from_millis(2500);
+                    while std::time::Instant::now() < deadline {
+                        let mut still_present = false;
+                        for inst in &stale_instances {
+                            if let Ok(check) = std::process::Command::new("pnputil")
+                                .args(["/enum-devices", "/instanceid", inst])
+                                .creation_flags(CREATE_NO_WINDOW)
+                                .output()
+                            {
+                                let out_str = String::from_utf8_lossy(&check.stdout);
+                                if out_str.contains(inst) {
+                                    still_present = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if !still_present {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(150));
+                    }
                 }
             }
         }
     }
+}
+
+/// Parses the output of `pnputil /enum-devices /class Net` to find instance IDs
+/// of sing-tun Wintun devices (specifically sing-box's TUN adapter).
+pub fn parse_singbox_wintun_instances(pnputil_output: &str) -> Vec<String> {
+    let mut instances = Vec::new();
+    let mut current_instance: Option<String> = None;
+    let mut is_sing_tun = false;
+
+    for line in pnputil_output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if let Some(id) = current_instance.take() {
+                if is_sing_tun {
+                    instances.push(id);
+                }
+            }
+            current_instance = None;
+            is_sing_tun = false;
+            continue;
+        }
+
+        let lower = trimmed.to_lowercase();
+        if let Some(idx) = trimmed.find(r"SWD\Wintun\") {
+            let id = trimmed[idx..].trim().to_string();
+            current_instance = Some(id);
+        } else if lower.contains("sing-tun") {
+            is_sing_tun = true;
+        }
+    }
+
+    if let Some(id) = current_instance {
+        if is_sing_tun {
+            instances.push(id);
+        }
+    }
+
+    instances
 }
 
 /// Parses the output of `pnputil /enum-devices /class Net` to find instance IDs
@@ -517,6 +579,36 @@ Status:                     Disconnected
         assert_eq!(all.len(), 2);
         assert_eq!(all[0], r"SWD\Wintun\{5AB05583-B50F-8579-BBD8-7243AE1FBEF5}");
         assert_eq!(all[1], r"SWD\Wintun\{1BF0EB02-8C39-B209-F8B5-8B00F51DB18B}");
+    }
+
+    #[test]
+    fn test_parse_singbox_wintun_instances() {
+        let sample = r#"
+Instance ID:                SWD\Wintun\{5AB05583-B50F-8579-BBD8-7243AE1FBEF5}
+Device Description:         sing-tun Tunnel
+Class Name:                 Net
+Status:                     Started
+
+Instance ID:                SWD\Wintun\{1BF0EB02-8C39-B209-F8B5-8B00F51DB18B}
+Device Description:         sing-tun Tunnel
+Class Name:                 Net
+Status:                     Started
+
+Instance ID:                SWD\Wintun\{99999999-9999-9999-9999-999999999999}
+Device Description:         WireGuard Tunnel
+Class Name:                 Net
+Status:                     Started
+"#;
+        let sing_tun = parse_singbox_wintun_instances(sample);
+        assert_eq!(sing_tun.len(), 2);
+        assert_eq!(
+            sing_tun[0],
+            r"SWD\Wintun\{5AB05583-B50F-8579-BBD8-7243AE1FBEF5}"
+        );
+        assert_eq!(
+            sing_tun[1],
+            r"SWD\Wintun\{1BF0EB02-8C39-B209-F8B5-8B00F51DB18B}"
+        );
     }
 
     #[test]

@@ -121,6 +121,11 @@ pub fn run() {
                         );
                         let vpn = app_state.vpn.clone();
                         tauri::async_runtime::spawn(async move {
+                            // Give the network stack and window setup a brief moment to settle on boot/launch
+                            #[cfg(target_os = "windows")]
+                            {
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            }
                             if let Err(e) = vpn.connect().await {
                                 tracing::error!("Auto-connect on launch failed: {}", e);
                             }

@@ -711,6 +711,29 @@ impl CoreManager {
     }
 
     pub async fn start_core(&self, config: serde_json::Value) -> Result<u32, CoreError> {
+        match self.start_core_attempt(&config).await {
+            Ok(pid) => Ok(pid),
+            Err(CoreError::StartFailed(ref msg))
+                if msg.contains("Cannot create a file when that file already exists")
+                    || msg.contains("open existing adapter: Element not found")
+                    || msg.contains("configure tun interface") =>
+            {
+                self.log_manager.add_log(
+                    "warn",
+                    "Detected TUN adapter collision from previous session; performing deep cleanup and retrying...",
+                );
+                #[cfg(target_os = "windows")]
+                {
+                    self.tun_manager.cleanup_stale_adapter("rustybox-tun");
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                }
+                self.start_core_attempt(&config).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn start_core_attempt(&self, config: &serde_json::Value) -> Result<u32, CoreError> {
         {
             let lock = self
                 .process
@@ -722,11 +745,11 @@ impl CoreManager {
         }
 
         let binary = normalize_path(&self.find_binary().ok_or(CoreError::BinaryNotFound)?);
-        self.validate_config(&config)?;
+        self.validate_config(config)?;
 
         let temp_dir = std::env::temp_dir();
         let config_path = temp_dir.join(format!("rustybox_run_{}.json", uuid::Uuid::new_v4()));
-        let json_str = serde_json::to_string_pretty(&config)?;
+        let json_str = serde_json::to_string_pretty(config)?;
         std::fs::write(&config_path, json_str)?;
 
         if let Ok(mut recent) = self.recent_output.lock() {
@@ -937,16 +960,29 @@ impl CoreManager {
             #[cfg(target_os = "windows")]
             {
                 extern "system" {
+                    fn AttachConsole(dwProcessId: u32) -> i32;
+                    fn FreeConsole() -> i32;
                     fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32) -> i32;
+                    fn SetConsoleCtrlHandler(
+                        handlerRoutine: Option<extern "system" fn(u32) -> i32>,
+                        add: i32,
+                    ) -> i32;
                 }
                 const CTRL_BREAK_EVENT: u32 = 1;
                 // Signal sing-box for graceful teardown (routes restore and Wintun adapter cleanup)
                 unsafe {
-                    GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
+                    if AttachConsole(proc.pid) != 0 {
+                        SetConsoleCtrlHandler(None, 1);
+                        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+                        FreeConsole();
+                        SetConsoleCtrlHandler(None, 0);
+                    } else {
+                        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
+                    }
                 }
-                // Wait up to 6s for graceful exit (routes restore and Wintun adapter cleanup)
+                // Wait up to 5s for graceful exit (routes restore and Wintun adapter cleanup)
                 let graceful_exit =
-                    tokio::time::timeout(Duration::from_millis(6000), proc.child.wait()).await;
+                    tokio::time::timeout(Duration::from_millis(5000), proc.child.wait()).await;
 
                 if graceful_exit.is_err() {
                     let _ = proc.child.kill().await;
