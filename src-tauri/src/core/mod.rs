@@ -313,6 +313,11 @@ impl CoreManager {
             "sing-box"
         };
 
+        let nixos_wrapper = PathBuf::from("/run/wrappers/bin").join(exe_name);
+        if nixos_wrapper.exists() {
+            return Some(nixos_wrapper);
+        }
+
         // 2. Official Tauri resource directory (bundled with application)
         if let Ok(lock) = self.resource_dir.lock() {
             if let Some(ref res_dir) = *lock {
@@ -577,6 +582,22 @@ impl CoreManager {
 
                 if cfg.comp_lzo {
                     ovpn_json["allow_compression"] = json!("yes");
+                    ovpn_json["compression_lzo"] = json!("yes");
+                }
+
+                let auth_val = cfg.auth.as_deref().or_else(|| {
+                    if let Some(ref c) = cfg.cipher {
+                        if c.to_uppercase().contains("CBC") {
+                            Some("SHA1")
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
+                if let Some(auth) = auth_val {
+                    ovpn_json["auth"] = json!(auth);
                 }
 
                 if let Some(ref user) = cfg.username {
@@ -587,7 +608,16 @@ impl CoreManager {
                 }
 
                 let mut tls_json = json!({});
-                tls_json["server_name"] = json!(profile.server);
+                let sname = cfg.server_name.as_deref().or_else(|| {
+                    if profile.server.parse::<std::net::IpAddr>().is_err() {
+                        Some(profile.server.as_str())
+                    } else {
+                        None
+                    }
+                });
+                if let Some(sn) = sname {
+                    tls_json["server_name"] = json!(sn);
+                }
 
                 if let Some(ref ca) = cfg.ca_cert {
                     let trimmed = ca.trim();
@@ -721,7 +751,7 @@ impl CoreManager {
                 }));
                 dns_rules.push(json!({
                     "domain": work_domains,
-                    "server": "dns-direct"
+                    "server": "dns-hosts"
                 }));
             }
             if !work_ips.is_empty() {
@@ -797,6 +827,13 @@ impl CoreManager {
             _direct_dns
         };
 
+        let hosts_path = crate::platform::hosts::get_system_hosts_path();
+        let hosts_server = json!({
+            "tag": "dns-hosts",
+            "type": "hosts",
+            "path": [hosts_path.to_string_lossy()]
+        });
+
         let mut final_config = json!({
             "log": {
                 "level": log_level,
@@ -814,7 +851,8 @@ impl CoreManager {
                         "tag": "dns-direct",
                         "type": "udp",
                         "server": direct_dns_val
-                    }
+                    },
+                    hosts_server
                 ],
                 "rules": dns_rules,
                 "final": final_dns
@@ -1431,6 +1469,8 @@ mod tests {
                 tls_crypt: None,
                 auth_user_pass_required: true,
                 raw_ovpn: None,
+                auth: None,
+                server_name: None,
             },
         );
 
@@ -1455,10 +1495,12 @@ mod tests {
         assert_eq!(ep["server_port"], 12345);
         assert_eq!(ep["network"], "udp");
         assert_eq!(ep["allow_compression"], "yes");
+        assert_eq!(ep["compression_lzo"], "yes");
+        assert_eq!(ep["auth"], "SHA1");
         assert_eq!(ep["username"], "user1");
         assert_eq!(ep["password"], "secret");
         assert_eq!(ep["data_ciphers"][0], "AES-256-CBC");
-        assert_eq!(ep["tls"]["server_name"], "195.122.253.130");
+        assert!(ep["tls"].get("server_name").is_none());
         assert!(ep["tls"]["certificate"][0].as_str().unwrap().contains("CA"));
         assert!(ep["tls"]["client_certificate"][0]
             .as_str()
@@ -1513,6 +1555,8 @@ mod tests {
                 tls_crypt: None,
                 auth_user_pass_required: true,
                 raw_ovpn: Some("iroute 192.168.100.0 255.255.254.0".to_string()),
+                auth: None,
+                server_name: None,
             },
         );
 

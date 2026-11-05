@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.15";
+export const APP_VERSION = "0.1.16";
 
 export type ConnectionState = "disconnected" | "starting" | "connected" | "stopping" | "error";
 

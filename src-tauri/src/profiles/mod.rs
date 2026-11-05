@@ -42,6 +42,10 @@ pub struct OpenvpnConfig {
     pub tls_crypt: Option<String>,
     pub auth_user_pass_required: bool,
     pub raw_ovpn: Option<String>,
+    #[serde(default)]
+    pub auth: Option<String>,
+    #[serde(default)]
+    pub server_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -484,6 +488,8 @@ pub fn parse_ovpn(
     let mut client_key: Option<String> = None;
     let mut tls_auth: Option<String> = None;
     let mut tls_crypt: Option<String> = None;
+    let mut auth: Option<String> = None;
+    let mut server_name: Option<String> = None;
 
     // First pass: extract inline blocks like <ca>...</ca>, <cert>...</cert>, <key>...</key>
     let mut inline_blocks: std::collections::HashMap<String, String> =
@@ -663,6 +669,20 @@ pub fn parse_ovpn(
             "tls-crypt" if tls_crypt.is_none() && tokens.len() >= 2 => {
                 tls_crypt = Some(load_ovpn_file_ref(&tokens[1], base_dir, "TLS Crypt key")?);
             }
+            "auth" if auth.is_none() && tokens.len() >= 2 => {
+                let a = tokens[1].to_uppercase();
+                if a != "NONE" {
+                    auth = Some(a);
+                }
+            }
+            "verify-x509-name" if server_name.is_none() && tokens.len() >= 2 => {
+                let name = tokens[1].trim_matches('"').trim_matches('\'').to_string();
+                server_name = Some(name);
+            }
+            "remote-cert-tls" if server_name.is_none() && tokens.len() >= 2 => {
+                let name = tokens[1].trim_matches('"').trim_matches('\'').to_string();
+                server_name = Some(name);
+            }
             _ => {}
         }
     }
@@ -675,6 +695,18 @@ pub fn parse_ovpn(
     let name = default_name
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("OpenVPN {}:{}", server, port));
+
+    let auth = auth.or_else(|| {
+        if let Some(ref c) = cipher {
+            if c.to_uppercase().contains("CBC") {
+                Some("SHA1".to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
 
     let config = OpenvpnConfig {
         proto,
@@ -689,6 +721,8 @@ pub fn parse_ovpn(
         tls_crypt,
         auth_user_pass_required,
         raw_ovpn: Some(content.to_string()),
+        auth,
+        server_name,
     };
 
     Ok(Profile {
@@ -1106,5 +1140,43 @@ INLINE_KEY
         let ovpn_content = "dev tun\nproto udp";
         let res = parse_ovpn(ovpn_content, None, None);
         assert!(matches!(res, Err(ProfileError::InvalidOvpn(_))));
+    }
+
+    #[test]
+    fn test_parse_ovpn_auth_and_server_name() {
+        let ovpn_content = r#"
+client
+dev tun
+proto udp
+remote 195.122.253.130 12345
+cipher AES-256-CBC
+remote-cert-tls server
+"#;
+        let profile = parse_ovpn(ovpn_content, None, None).unwrap();
+        match profile.protocol {
+            ProtocolConfig::Openvpn(cfg) => {
+                assert_eq!(cfg.auth, Some("SHA1".to_string()));
+                assert_eq!(cfg.server_name, Some("server".to_string()));
+            }
+            _ => panic!("Expected Openvpn config"),
+        }
+
+        let ovpn_custom = r#"
+client
+dev tun
+proto udp
+remote vpn.corp.local 1194
+cipher AES-128-GCM
+auth SHA256
+verify-x509-name "my-vpn-server" name
+"#;
+        let profile2 = parse_ovpn(ovpn_custom, None, None).unwrap();
+        match profile2.protocol {
+            ProtocolConfig::Openvpn(cfg) => {
+                assert_eq!(cfg.auth, Some("SHA256".to_string()));
+                assert_eq!(cfg.server_name, Some("my-vpn-server".to_string()));
+            }
+            _ => panic!("Expected Openvpn config"),
+        }
     }
 }

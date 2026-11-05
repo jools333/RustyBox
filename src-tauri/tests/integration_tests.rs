@@ -488,6 +488,8 @@ async fn test_scenario_15_dual_vpn_split_tunnel_routing() {
             tls_crypt: None,
             auth_user_pass_required: true,
             raw_ovpn: Some("#iroute 192.168.100.0 255.255.254.0".to_string()),
+            auth: None,
+            server_name: None,
         },
     );
 
