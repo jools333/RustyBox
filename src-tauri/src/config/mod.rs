@@ -111,6 +111,10 @@ impl ConfigManager {
         self.config.read().map(|c| c.clone()).unwrap_or_default()
     }
 
+    pub fn get(&self) -> AppConfig {
+        self.get_config()
+    }
+
     pub fn save_config(&self, new_config: AppConfig) -> Result<(), ConfigError> {
         let json = serde_json::to_string_pretty(&new_config)?;
         if let Some(parent) = self.path.parent() {

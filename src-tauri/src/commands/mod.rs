@@ -146,7 +146,7 @@ pub async fn update_profile(
         c.profiles = state.profiles.list();
     });
 
-    let cfg = state.config.get();
+    let cfg = state.config.get_config();
     let is_active = cfg.active_profile_id.as_deref() == Some(&profile_id);
     let is_work = cfg.work_profile_enabled && cfg.work_profile_id.as_deref() == Some(&profile_id);
     if is_active || is_work {
