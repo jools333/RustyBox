@@ -334,6 +334,22 @@ impl ConnectionManager {
         Ok(())
     }
 
+    pub async fn reconnect(&self) -> Result<(), VpnError> {
+        let is_connected = {
+            let state = self.get_state();
+            state == ConnectionState::Connected || state == ConnectionState::Starting
+        };
+
+        if is_connected {
+            self.log_manager
+                .add_log("info", "Reconnecting VPN to apply configuration updates...");
+            self.disconnect().await?;
+            self.connect().await?;
+        }
+
+        Ok(())
+    }
+
     fn set_error(&self, message: &str) {
         if let Ok(mut state) = self.state.write() {
             *state = ConnectionState::Error;

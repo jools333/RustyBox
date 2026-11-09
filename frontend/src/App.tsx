@@ -147,6 +147,11 @@ export const App: React.FC = () => {
     await loadAllData();
   };
 
+  const handleUpdateProfile = async (profile: Profile) => {
+    await api.updateProfile(profile);
+    await loadAllData();
+  };
+
   const handleDeleteProfile = async (id: string) => {
     if (confirm("Delete this server profile?")) {
       await api.deleteProfile(id);
@@ -249,6 +254,7 @@ export const App: React.FC = () => {
             onSelect={handleSelectProfile}
             onImportUri={handleImportUri}
             onAdd={handleAddProfile}
+            onUpdate={handleUpdateProfile}
             onDelete={handleDeleteProfile}
             onReload={loadAllData}
           />

@@ -128,6 +128,57 @@ impl Profile {
             only_network_resources: false,
         }
     }
+
+    pub fn validate(&self) -> Result<(), ProfileError> {
+        if self.server.trim().is_empty() {
+            return Err(ProfileError::InvalidHostOrPort(
+                "Server host cannot be empty".to_string(),
+            ));
+        }
+        if self.port == 0 {
+            return Err(ProfileError::InvalidHostOrPort(
+                "Port must be between 1 and 65535".to_string(),
+            ));
+        }
+
+        match &self.protocol {
+            ProtocolConfig::Vless(cfg) => {
+                let uuid_trimmed = cfg.uuid.trim();
+                if uuid_trimmed.is_empty() {
+                    return Err(ProfileError::MissingParameter(
+                        "UUID cannot be empty".to_string(),
+                    ));
+                }
+                Uuid::parse_str(uuid_trimmed)
+                    .map_err(|_| ProfileError::InvalidUuid(cfg.uuid.clone()))?;
+                if cfg.reality && cfg.public_key.as_deref().unwrap_or("").trim().is_empty() {
+                    return Err(ProfileError::MissingParameter(
+                        "REALITY requires 'pbk' (public key)".to_string(),
+                    ));
+                }
+            }
+            ProtocolConfig::Shadowsocks(cfg) => {
+                if cfg.method.trim().is_empty() {
+                    return Err(ProfileError::MissingParameter(
+                        "Cipher method cannot be empty".to_string(),
+                    ));
+                }
+                if cfg.password.trim().is_empty() {
+                    return Err(ProfileError::MissingParameter(
+                        "Password cannot be empty".to_string(),
+                    ));
+                }
+            }
+            ProtocolConfig::Openvpn(cfg) => {
+                if cfg.proto.trim().is_empty() {
+                    return Err(ProfileError::MissingParameter(
+                        "Protocol cannot be empty".to_string(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 pub fn parse_profile_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
@@ -836,7 +887,47 @@ impl ProfileManager {
         Ok(profile)
     }
 
-    pub fn update(&self, profile: Profile) -> Result<(), ProfileError> {
+    pub fn update(&self, mut profile: Profile) -> Result<(), ProfileError> {
+        profile.name = profile.name.trim().to_string();
+        if profile.name.is_empty() {
+            profile.name = format!("{}:{}", profile.server.trim(), profile.port);
+        }
+        profile.server = profile.server.trim().to_string();
+        if let ProtocolConfig::Vless(ref mut cfg) = profile.protocol {
+            cfg.uuid = cfg.uuid.trim().to_string();
+            cfg.flow = cfg
+                .flow
+                .as_ref()
+                .map(|f| f.trim().to_string())
+                .filter(|f| !f.is_empty());
+            cfg.sni = cfg
+                .sni
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            cfg.network = cfg
+                .network
+                .as_ref()
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty());
+            cfg.fingerprint = cfg
+                .fingerprint
+                .as_ref()
+                .map(|fp| fp.trim().to_string())
+                .filter(|fp| !fp.is_empty());
+            cfg.public_key = cfg
+                .public_key
+                .as_ref()
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty());
+            cfg.short_id = cfg
+                .short_id
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+        }
+        profile.validate()?;
+
         let mut list = self
             .profiles
             .write()
@@ -1009,10 +1100,43 @@ mod tests {
         let p1 = mgr.import_uri(uri).unwrap();
         assert_eq!(mgr.list().len(), 1);
 
+        // Update name
         let mut p1_mod = p1.clone();
         p1_mod.name = "Renamed Server".to_string();
         mgr.update(p1_mod.clone()).unwrap();
         assert_eq!(mgr.get(&p1.id).unwrap().name, "Renamed Server");
+
+        // Update server IP/host and flow
+        let mut p1_mod2 = mgr.get(&p1.id).unwrap();
+        p1_mod2.server = "192.168.1.100".to_string();
+        if let ProtocolConfig::Vless(ref mut cfg) = p1_mod2.protocol {
+            cfg.flow = Some("xtls-rprx-vision".to_string());
+        }
+        mgr.update(p1_mod2).unwrap();
+
+        let updated = mgr.get(&p1.id).unwrap();
+        assert_eq!(updated.server, "192.168.1.100");
+        if let ProtocolConfig::Vless(ref cfg) = updated.protocol {
+            assert_eq!(cfg.flow, Some("xtls-rprx-vision".to_string()));
+        } else {
+            panic!("Expected Vless protocol");
+        }
+
+        // Setting empty flow string converts to None
+        let mut p1_mod3 = updated.clone();
+        if let ProtocolConfig::Vless(ref mut cfg) = p1_mod3.protocol {
+            cfg.flow = Some("   ".to_string());
+        }
+        mgr.update(p1_mod3).unwrap();
+        let updated2 = mgr.get(&p1.id).unwrap();
+        if let ProtocolConfig::Vless(ref cfg) = updated2.protocol {
+            assert_eq!(cfg.flow, None);
+        }
+
+        // Updating with invalid server or port fails
+        let mut invalid_profile = updated2.clone();
+        invalid_profile.server = "  ".to_string();
+        assert!(mgr.update(invalid_profile).is_err());
 
         mgr.delete(&p1.id).unwrap();
         assert_eq!(mgr.list().len(), 0);

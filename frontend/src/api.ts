@@ -194,9 +194,15 @@ export const api = {
     });
   },
 
-  updateProfile: async (profile: Profile): Promise<void> => {
-    if (!isTauri()) return;
-    return invoke("update_profile", { profile });
+  updateProfile: async (profile: Profile): Promise<Profile> => {
+    if (!isTauri()) {
+      const idx = mockProfiles.findIndex((p) => p.id === profile.id);
+      if (idx !== -1) {
+        mockProfiles[idx] = profile;
+      }
+      return profile;
+    }
+    return invoke<Profile>("update_profile", { profile });
   },
 
   deleteProfile: async (id: string): Promise<void> => {

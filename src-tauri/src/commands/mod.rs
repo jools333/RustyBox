@@ -131,12 +131,29 @@ pub fn import_ovpn_content(
 }
 
 #[tauri::command]
-pub fn update_profile(state: State<'_, AppState>, profile: Profile) -> Result<(), String> {
+pub async fn update_profile(
+    state: State<'_, AppState>,
+    profile: Profile,
+) -> Result<Profile, String> {
+    let profile_id = profile.id.clone();
     state.profiles.update(profile).map_err(|e| e.to_string())?;
+    let updated = state
+        .profiles
+        .get(&profile_id)
+        .ok_or_else(|| "Profile not found after update".to_string())?;
+
     let _ = state.config.update(|c| {
         c.profiles = state.profiles.list();
     });
-    Ok(())
+
+    let cfg = state.config.get();
+    let is_active = cfg.active_profile_id.as_deref() == Some(&profile_id);
+    let is_work = cfg.work_profile_enabled && cfg.work_profile_id.as_deref() == Some(&profile_id);
+    if is_active || is_work {
+        let _ = state.vpn.reconnect().await;
+    }
+
+    Ok(updated)
 }
 
 #[tauri::command]

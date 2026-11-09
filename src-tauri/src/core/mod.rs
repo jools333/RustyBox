@@ -508,7 +508,9 @@ impl CoreManager {
                 });
 
                 if let Some(ref flow) = cfg.flow {
-                    vless_json["flow"] = json!(flow);
+                    if !flow.trim().is_empty() {
+                        vless_json["flow"] = json!(flow.trim());
+                    }
                 }
 
                 if cfg.tls {
