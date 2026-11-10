@@ -47,6 +47,7 @@ export interface Profile {
   protocol: ProtocolConfig;
   latency_ms?: number;
   only_network_resources?: boolean;
+  mtu?: number;
 }
 
 export type RuleAction = "DIRECT" | "VPN";
@@ -106,6 +107,7 @@ export interface AppConfig {
   close_to_tray: boolean;
   singbox_path: string | null;
   tun_interface_name: string;
+  tun_mtu?: number;
   log_level: string;
   auto_check_updates?: boolean;
   auto_start?: boolean;

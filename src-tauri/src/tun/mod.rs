@@ -157,11 +157,13 @@ impl TunManager {
     }
 
     /// Generates sing-box JSON inbound block for TUN
-    pub fn generate_tun_inbound(&self, interface_name: &str) -> serde_json::Value {
+    pub fn generate_tun_inbound(&self, interface_name: &str, mtu: u32) -> serde_json::Value {
+        let effective_mtu = if mtu == 0 { 1500 } else { mtu };
         serde_json::json!({
             "type": "tun",
             "tag": "tun-in",
             "interface_name": interface_name,
+            "mtu": effective_mtu,
             "address": [
                 "172.19.0.1/30",
                 "fdfe:dcba:9876::1/126"
@@ -530,13 +532,22 @@ mod tests {
     #[test]
     fn test_generate_tun_inbound() {
         let mgr = TunManager::new();
-        let inbound = mgr.generate_tun_inbound("rustybox-tun");
+        let inbound = mgr.generate_tun_inbound("rustybox-tun", 1500);
         assert_eq!(inbound["type"], "tun");
         assert_eq!(inbound["interface_name"], "rustybox-tun");
+        assert_eq!(inbound["mtu"], 1500);
         assert_eq!(inbound["auto_route"], true);
         assert_eq!(inbound["strict_route"], true);
         assert_eq!(inbound["stack"], "mixed");
         assert!(inbound["address"].is_array());
+
+        // Zero MTU falls back to 1500
+        let inbound_default = mgr.generate_tun_inbound("rustybox-tun", 0);
+        assert_eq!(inbound_default["mtu"], 1500);
+
+        // Custom MTU
+        let inbound_custom = mgr.generate_tun_inbound("rustybox-tun", 1420);
+        assert_eq!(inbound_custom["mtu"], 1420);
     }
 
     #[test]

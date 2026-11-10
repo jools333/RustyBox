@@ -35,6 +35,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [autoStart, setAutoStart] = useState(config.auto_start || false);
   const [autoConnect, setAutoConnect] = useState(config.auto_connect ?? false);
   const [tunName, setTunName] = useState(config.tun_interface_name);
+  const [tunMtu, setTunMtu] = useState<number>(config.tun_mtu ?? 1500);
   const [remoteDns, setRemoteDns] = useState(config.remote_dns);
   const [directDns, setDirectDns] = useState(config.direct_dns);
   const [singboxPath, setSingboxPath] = useState(config.singbox_path || "");
@@ -138,6 +139,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       auto_start: autoStart,
       auto_connect: autoConnect,
       tun_interface_name: tunName,
+      tun_mtu: Number(tunMtu) > 0 ? Number(tunMtu) : 1500,
       remote_dns: remoteDns,
       direct_dns: directDns,
       singbox_path: singboxPath.trim() ? singboxPath.trim() : null,
@@ -423,17 +425,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           />
         </div>
 
-        {/* Interface name */}
-        <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
-          <label className="font-medium text-slate-300 block">
-            TUN Virtual Interface Name
-          </label>
-          <input
-            type="text"
-            value={tunName}
-            onChange={(e) => setTunName(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono"
-          />
+        {/* Interface name and MTU */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="col-span-2 p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+            <label className="font-medium text-slate-300 block">
+              TUN Virtual Interface Name
+            </label>
+            <input
+              type="text"
+              value={tunName}
+              onChange={(e) => setTunName(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono"
+            />
+          </div>
+          <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+            <label className="font-medium text-slate-300 block">
+              TUN MTU
+            </label>
+            <input
+              type="number"
+              min={576}
+              max={65535}
+              value={tunMtu}
+              onChange={(e) => setTunMtu(parseInt(e.target.value, 10) || 0)}
+              placeholder="1500"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono"
+            />
+          </div>
         </div>
 
         {/* DNS settings */}

@@ -690,6 +690,7 @@ impl CoreManager {
         remote_dns: &str,
         _direct_dns: &str,
         tun_interface_name: &str,
+        tun_mtu: u32,
         log_level: &str,
     ) -> serde_json::Value {
         let mut endpoints = Vec::new();
@@ -815,7 +816,12 @@ impl CoreManager {
             "dns-remote"
         };
 
-        let tun_inbound = self.tun_manager.generate_tun_inbound(tun_interface_name);
+        let effective_mtu = profile
+            .mtu
+            .unwrap_or(if tun_mtu == 0 { 1500 } else { tun_mtu });
+        let tun_inbound = self
+            .tun_manager
+            .generate_tun_inbound(tun_interface_name, effective_mtu);
 
         let remote_dns_val = if remote_dns.is_empty() {
             "1.1.1.1"
@@ -1280,10 +1286,12 @@ mod tests {
             "1.1.1.1",
             "local",
             "rustybox-tun",
+            1500,
             "info",
         );
 
         assert_eq!(config["dns"]["servers"][0]["tag"], "dns-remote");
+        assert_eq!(config["inbounds"][0]["mtu"], 1500);
         assert_eq!(config["outbounds"][0]["type"], "vless");
         assert_eq!(
             config["outbounds"][0]["uuid"],
@@ -1328,9 +1336,11 @@ mod tests {
             "8.8.8.8",
             "local",
             "rustybox-tun",
+            1500,
             "info",
         );
 
+        assert_eq!(config["inbounds"][0]["mtu"], 1500);
         assert_eq!(config["outbounds"][0]["type"], "shadowsocks");
         assert_eq!(config["outbounds"][0]["method"], "chacha20-ietf-poly1305");
         assert_eq!(config["outbounds"][0]["password"], "mypassword123");
@@ -1485,8 +1495,11 @@ mod tests {
             "1.1.1.1",
             "77.88.8.8",
             "rustybox-tun",
+            1500,
             "info",
         );
+
+        assert_eq!(cfg["inbounds"][0]["mtu"], 1500);
 
         let endpoints = cfg["endpoints"].as_array().expect("Should have endpoints");
         assert_eq!(endpoints.len(), 1);
@@ -1571,8 +1584,11 @@ mod tests {
             "1.1.1.1",
             "77.88.8.8",
             "rustybox-tun",
+            1500,
             "info",
         );
+
+        assert_eq!(cfg["inbounds"][0]["mtu"], 1500);
 
         // Verify outbounds contains main "proxy"
         let outbounds = cfg["outbounds"].as_array().expect("outbounds");

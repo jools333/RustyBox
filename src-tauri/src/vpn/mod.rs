@@ -224,6 +224,7 @@ impl ConnectionManager {
             &cfg.remote_dns,
             &cfg.direct_dns,
             &cfg.tun_interface_name,
+            cfg.tun_mtu,
             &cfg.log_level,
         );
 

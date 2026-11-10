@@ -49,6 +49,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   const [sni, setSni] = useState("");
   const [ssMethod, setSsMethod] = useState("chacha20-ietf-poly1305");
   const [ssPassword, setSsPassword] = useState("");
+  const [customMtu, setCustomMtu] = useState<string>("");
 
   // Edit Profile state
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
@@ -194,6 +195,9 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   const handleManualAdd = async () => {
     if (!name || !server || !port) return;
 
+    const parsedMtu = parseInt(customMtu, 10);
+    const mtuVal = !isNaN(parsedMtu) && parsedMtu > 0 ? parsedMtu : undefined;
+
     let profile: Profile;
     if (protoType === "Vless") {
       const vlessCfg: VlessConfig = {
@@ -213,6 +217,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         server,
         port,
         protocol: { type: "Vless", ...vlessCfg },
+        mtu: mtuVal,
       };
     } else {
       const ssCfg: ShadowsocksConfig = {
@@ -225,10 +230,12 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         server,
         port,
         protocol: { type: "Shadowsocks", ...ssCfg },
+        mtu: mtuVal,
       };
     }
 
     await onAdd(profile);
+    setCustomMtu("");
     setShowManualModal(false);
   };
 
@@ -461,6 +468,11 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                       {ovpnCipher && (
                         <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-slate-800/80 text-slate-400 border border-slate-700/60">
                           {ovpnCipher}
+                        </span>
+                      )}
+                      {p.mtu && (
+                        <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-slate-800/80 text-orange-400 border border-slate-700/60">
+                          MTU {p.mtu}
                         </span>
                       )}
                       {p.only_network_resources && (
@@ -699,6 +711,19 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">MTU (Optional, default 1500)</label>
+                <input
+                  type="number"
+                  min={576}
+                  max={65535}
+                  value={customMtu}
+                  onChange={(e) => setCustomMtu(e.target.value)}
+                  placeholder="1500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
+                />
               </div>
 
               <div>

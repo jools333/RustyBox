@@ -85,6 +85,8 @@ pub struct Profile {
     pub latency_ms: Option<u64>,
     #[serde(default)]
     pub only_network_resources: bool,
+    #[serde(default)]
+    pub mtu: Option<u32>,
 }
 
 impl Profile {
@@ -97,6 +99,7 @@ impl Profile {
             protocol: ProtocolConfig::Vless(config),
             latency_ms: None,
             only_network_resources: false,
+            mtu: None,
         }
     }
 
@@ -114,6 +117,7 @@ impl Profile {
             protocol: ProtocolConfig::Shadowsocks(config),
             latency_ms: None,
             only_network_resources: false,
+            mtu: None,
         }
     }
 
@@ -126,6 +130,7 @@ impl Profile {
             protocol: ProtocolConfig::Openvpn(config),
             latency_ms: None,
             only_network_resources: false,
+            mtu: None,
         }
     }
 
@@ -230,6 +235,7 @@ fn parse_vless_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
     let mut sid = None;
     let mut flow = None;
     let mut network = None;
+    let mut mtu = None;
 
     for (k, v) in url.query_pairs() {
         match k.as_ref() {
@@ -242,6 +248,7 @@ fn parse_vless_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
                 flow = Some(v.to_string());
             }
             "type" => network = Some(v.to_string()),
+            "mtu" => mtu = v.parse::<u32>().ok(),
             _ => {}
         }
     }
@@ -281,6 +288,7 @@ fn parse_vless_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         protocol: ProtocolConfig::Vless(vless_config),
         latency_ms: None,
         only_network_resources: false,
+        mtu,
     })
 }
 
@@ -379,6 +387,17 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
     if let Some((user_info_raw, host_port)) = body.split_once('@') {
         let (method, password) = parse_shadowsocks_userinfo(user_info_raw)?;
 
+        let mtu = host_port.split_once('?').and_then(|(_, q)| {
+            q.split('&').find_map(|pair| {
+                let (k, v) = pair.split_once('=')?;
+                if k.eq_ignore_ascii_case("mtu") {
+                    v.parse::<u32>().ok()
+                } else {
+                    None
+                }
+            })
+        });
+
         let host_port_clean = host_port
             .split('?')
             .next()
@@ -401,6 +420,7 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
             protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
             latency_ms: None,
             only_network_resources: false,
+            mtu,
         });
     }
 
@@ -413,6 +433,17 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
     })?;
 
     let (method, password) = parse_shadowsocks_userinfo(user_info)?;
+
+    let mtu = host_port.split_once('?').and_then(|(_, q)| {
+        q.split('&').find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            if k.eq_ignore_ascii_case("mtu") {
+                v.parse::<u32>().ok()
+            } else {
+                None
+            }
+        })
+    });
 
     let host_port_clean = host_port
         .split('?')
@@ -436,6 +467,7 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
         latency_ms: None,
         only_network_resources: false,
+        mtu,
     })
 }
 
@@ -541,6 +573,7 @@ pub fn parse_ovpn(
     let mut tls_crypt: Option<String> = None;
     let mut auth: Option<String> = None;
     let mut server_name: Option<String> = None;
+    let mut ovpn_mtu: Option<u32> = None;
 
     // First pass: extract inline blocks like <ca>...</ca>, <cert>...</cert>, <key>...</key>
     let mut inline_blocks: std::collections::HashMap<String, String> =
@@ -734,6 +767,11 @@ pub fn parse_ovpn(
                 let name = tokens[1].trim_matches('"').trim_matches('\'').to_string();
                 server_name = Some(name);
             }
+            "tun-mtu" | "link-mtu" | "mtu" if ovpn_mtu.is_none() && tokens.len() >= 2 => {
+                if let Ok(m) = tokens[1].parse::<u32>() {
+                    ovpn_mtu = Some(m);
+                }
+            }
             _ => {}
         }
     }
@@ -784,6 +822,7 @@ pub fn parse_ovpn(
         protocol: ProtocolConfig::Openvpn(config),
         latency_ms: None,
         only_network_resources: false,
+        mtu: ovpn_mtu,
     })
 }
 
@@ -1302,5 +1341,23 @@ verify-x509-name "my-vpn-server" name
             }
             _ => panic!("Expected Openvpn config"),
         }
+    }
+
+    #[test]
+    fn test_parse_mtu_from_profiles() {
+        // VLESS with mtu query param
+        let vless_uri = "vless://a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d@vpn.example.com:443?security=reality&sni=cdn.example.org&pbk=enlGdIoYJfgX5TRxi5iQnDDFG-6TVwrPLtj00OdXvlM&sid=abcd1234&mtu=1400#Node1";
+        let vless_prof = parse_profile_uri(vless_uri).unwrap();
+        assert_eq!(vless_prof.mtu, Some(1400));
+
+        // Shadowsocks with mtu query param
+        let ss_uri = "ss://MjAyMi1ibGFrZTMtYWVzLTEyOC1nY206czdZTFpOMGVyaVJENXE1aFlyMHROZz09@ss.example.com:8388?mtu=1360#MySS";
+        let ss_prof = parse_profile_uri(ss_uri).unwrap();
+        assert_eq!(ss_prof.mtu, Some(1360));
+
+        // OpenVPN with tun-mtu
+        let ovpn = "client\ndev tun\nremote 1.2.3.4 1194\ntun-mtu 1420\n";
+        let ovpn_prof = parse_ovpn(ovpn, None, None).unwrap();
+        assert_eq!(ovpn_prof.mtu, Some(1420));
     }
 }

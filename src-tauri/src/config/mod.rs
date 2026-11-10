@@ -31,6 +31,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_tun_mtu() -> u32 {
+    1500
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     pub version: u32,
@@ -48,6 +52,8 @@ pub struct AppConfig {
     pub close_to_tray: bool,
     pub singbox_path: Option<String>,
     pub tun_interface_name: String,
+    #[serde(default = "default_tun_mtu")]
+    pub tun_mtu: u32,
     pub log_level: String,
     #[serde(default = "default_true")]
     pub auto_check_updates: bool,
@@ -76,6 +82,7 @@ impl Default for AppConfig {
             close_to_tray: true,
             singbox_path: None,
             tun_interface_name: "rustybox-tun".to_string(),
+            tun_mtu: 1500,
             log_level: "info".to_string(),
             auto_check_updates: true,
             auto_start: false,
@@ -185,6 +192,7 @@ mod tests {
         cfg.auto_connect = true;
         cfg.remote_dns = "8.8.8.8".to_string();
         cfg.auto_start = true;
+        cfg.tun_mtu = 1420;
         mgr.save_config(cfg.clone()).unwrap();
 
         let mgr2 = ConfigManager::new(path);
@@ -193,6 +201,7 @@ mod tests {
         assert!(loaded.auto_connect);
         assert_eq!(loaded.remote_dns, "8.8.8.8");
         assert!(loaded.auto_start);
+        assert_eq!(loaded.tun_mtu, 1420);
     }
 
     #[test]

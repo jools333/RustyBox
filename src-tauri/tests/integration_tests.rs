@@ -198,6 +198,7 @@ fn test_scenario_07_singbox_config_generation() {
         "1.1.1.1",
         "local",
         "rustybox-tun",
+        1500,
         "info",
     );
 
@@ -213,10 +214,11 @@ fn test_scenario_07_singbox_config_generation() {
     assert_eq!(rules[0]["action"], "sniff");
     assert_eq!(rules[1]["action"], "hijack-dns");
 
-    // TUN inbound modern format (address array)
+    // TUN inbound modern format (address array and MTU 1500)
     assert_eq!(config["inbounds"][0]["type"], "tun");
     assert!(config["inbounds"][0]["address"].is_array());
     assert_eq!(config["inbounds"][0]["auto_route"], true);
+    assert_eq!(config["inbounds"][0]["mtu"], 1500);
 }
 
 // 8. Scenario 8: Masking secrets in logs
@@ -438,8 +440,11 @@ verb 3
         "1.1.1.1",
         "77.88.8.8",
         "rustybox-tun",
+        1500,
         "info",
     );
+
+    assert_eq!(cfg["inbounds"][0]["mtu"], 1500);
 
     assert_eq!(cfg["endpoints"][0]["type"], "openvpn-client");
     assert_eq!(cfg["endpoints"][0]["tag"], "proxy");
@@ -503,8 +508,11 @@ async fn test_scenario_15_dual_vpn_split_tunnel_routing() {
         "1.1.1.1",
         "77.88.8.8",
         "rustybox-tun",
+        1500,
         "info",
     );
+
+    assert_eq!(cfg["inbounds"][0]["mtu"], 1500);
 
     // Verify main is in outbounds with tag "proxy"
     let outbounds = cfg["outbounds"].as_array().expect("outbounds");
