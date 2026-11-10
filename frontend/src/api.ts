@@ -65,6 +65,23 @@ const mockProfiles: Profile[] = [
       fingerprint: "chrome",
     },
   },
+  {
+    id: "profile-ovpn-4",
+    name: "Corporate Office (OpenVPN UDP)",
+    server: "vpn.corp.company.com",
+    port: 1194,
+    latency_ms: 18,
+    mtu: 1420,
+    only_network_resources: true,
+    protocol: {
+      type: "Openvpn",
+      proto: "udp",
+      cipher: "AES-256-GCM",
+      comp_lzo: false,
+      auth_user_pass_required: false,
+      ca_cert: "-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----",
+    },
+  },
 ];
 
 const mockRules: RoutingRule[] = [
@@ -254,6 +271,7 @@ export const api = {
         close_to_tray: true,
         singbox_path: null,
         tun_interface_name: "rustybox-tun",
+        tun_mtu: 1500,
         log_level: "info",
         auto_check_updates: true,
         auto_start: true,
@@ -356,6 +374,7 @@ export const api = {
         close_to_tray: true,
         singbox_path: null,
         tun_interface_name: "rustybox-tun",
+        tun_mtu: 1500,
         log_level: "info",
       };
     }
