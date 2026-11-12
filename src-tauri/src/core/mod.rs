@@ -321,7 +321,11 @@ impl CoreManager {
         // 2. Official Tauri resource directory (bundled with application)
         if let Ok(lock) = self.resource_dir.lock() {
             if let Some(ref res_dir) = *lock {
-                let candidates = [res_dir.join("bin").join(exe_name), res_dir.join(exe_name)];
+                let candidates = [
+                    res_dir.join("bin").join(exe_name),
+                    res_dir.join(exe_name),
+                    res_dir.join("_up_").join("bin").join(exe_name),
+                ];
                 for candidate in candidates {
                     if candidate.exists() {
                         ensure_executable(&candidate);
@@ -331,7 +335,7 @@ impl CoreManager {
             }
         }
 
-        // 3. Locations relative to current executable (portable, installed deb, AppImage, dev)
+        // 3. Locations relative to current executable (portable, installed deb, AppImage, macOS .app, dev)
         if let Ok(current_exe) = std::env::current_exe() {
             let clean_current_exe = normalize_path(&current_exe);
             if let Some(parent) = clean_current_exe.parent() {
@@ -344,8 +348,18 @@ impl CoreManager {
                     parent.join("_up_").join(exe_name),
                 ];
 
-                // Check grandparent paths (e.g. current_exe = /usr/bin/rustybox -> /usr/lib/rustybox/bin/sing-box)
+                // Check grandparent paths (e.g. /usr/bin/rustybox -> /usr/lib/rustybox/bin/sing-box,
+                // or RustyBox.app/Contents/MacOS/rustybox -> RustyBox.app/Contents/Resources/bin/sing-box)
                 if let Some(grandparent) = parent.parent() {
+                    candidates.push(grandparent.join("Resources").join("bin").join(exe_name));
+                    candidates.push(grandparent.join("Resources").join(exe_name));
+                    candidates.push(
+                        grandparent
+                            .join("Resources")
+                            .join("_up_")
+                            .join("bin")
+                            .join(exe_name),
+                    );
                     candidates.push(
                         grandparent
                             .join("lib")
@@ -392,8 +406,8 @@ impl CoreManager {
             }
         }
 
-        // 4. Linux standard package locations
-        #[cfg(not(target_os = "windows"))]
+        // 4. Platform standard package / bundle locations
+        #[cfg(target_os = "linux")]
         {
             let linux_system_candidates = [
                 PathBuf::from("/usr/lib/rustybox/bin").join(exe_name),
@@ -406,6 +420,22 @@ impl CoreManager {
                 PathBuf::from("/opt/RustyBox/bin").join(exe_name),
             ];
             for candidate in linux_system_candidates {
+                if candidate.exists() {
+                    ensure_executable(&candidate);
+                    return Some(normalize_path(&candidate));
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let macos_system_candidates = [
+                PathBuf::from("/Applications/RustyBox.app/Contents/Resources/bin").join(exe_name),
+                PathBuf::from("/Applications/RustyBox.app/Contents/Resources").join(exe_name),
+                PathBuf::from("/opt/homebrew/bin").join(exe_name),
+                PathBuf::from("/usr/local/bin").join(exe_name),
+            ];
+            for candidate in macos_system_candidates {
                 if candidate.exists() {
                     ensure_executable(&candidate);
                     return Some(normalize_path(&candidate));
@@ -1111,6 +1141,11 @@ impl CoreManager {
                         "sing-box exited during startup ({}): {}. Administrator privileges are required to configure the TUN interface on Windows. Please run RustyBox as Administrator.",
                         status, details
                     )
+                } else if details.to_lowercase().contains("operation not permitted") {
+                    format!(
+                        "sing-box exited during startup ({}): {}. Administrator (root) privileges are required to configure the TUN interface. Use 'Restart as Administrator' or run RustyBox with elevated privileges.",
+                        status, details
+                    )
                 } else {
                     format!("sing-box exited during startup ({}): {}", status, details)
                 };
@@ -1224,7 +1259,27 @@ impl CoreManager {
                 }
             }
 
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
+            {
+                extern "C" {
+                    fn kill(pid: i32, sig: i32) -> i32;
+                }
+                const SIGTERM: i32 = 15;
+                if proc.pid > 0 {
+                    unsafe {
+                        kill(proc.pid as i32, SIGTERM);
+                    }
+                }
+                // Wait up to 5s for graceful exit (routes & DNS restoration, utun/tun cleanup)
+                let graceful_exit =
+                    tokio::time::timeout(Duration::from_millis(5000), proc.child.wait()).await;
+
+                if graceful_exit.is_err() {
+                    let _ = proc.child.kill().await;
+                }
+            }
+
+            #[cfg(not(any(target_os = "windows", unix)))]
             {
                 let _ = proc.child.kill().await;
             }

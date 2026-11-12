@@ -188,7 +188,7 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               <span className="font-semibold block text-amber-200">
                 Administrator Rights Required
               </span>
-              TUN mode needs administrator or CAP_NET_ADMIN privileges to configure network routes.
+              TUN mode needs administrator, root, or CAP_NET_ADMIN privileges to configure network routes.
               <button
                 onClick={() => api.relaunchAsAdmin()}
                 className="mt-2 block px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-slate-950 font-semibold rounded-lg text-[11px] transition-colors"

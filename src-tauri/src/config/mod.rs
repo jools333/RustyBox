@@ -81,7 +81,11 @@ impl Default for AppConfig {
             direct_dns: "77.88.8.8".to_string(),
             close_to_tray: true,
             singbox_path: None,
-            tun_interface_name: "rustybox-tun".to_string(),
+            tun_interface_name: if cfg!(target_os = "macos") {
+                String::new()
+            } else {
+                "rustybox-tun".to_string()
+            },
             tun_mtu: 1500,
             log_level: "info".to_string(),
             auto_check_updates: true,

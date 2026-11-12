@@ -109,9 +109,14 @@ export const App: React.FC = () => {
       fetchStatus();
     } catch (e: any) {
       const msg = e?.message || String(e);
-      if (msg.includes("Access is denied") || msg.includes("Administrator privileges")) {
+      const lowerMsg = msg.toLowerCase();
+      if (
+        msg.includes("Access is denied") ||
+        msg.includes("Administrator privileges") ||
+        lowerMsg.includes("operation not permitted")
+      ) {
         alert(
-          "Administrator privileges required!\n\nTUN mode requires administrator privileges to create and configure the virtual network adapter on Windows.\n\nPlease close RustyBox, right-click its icon, and select 'Run as administrator'."
+          "Administrator/root privileges required!\n\nTUN mode requires elevated privileges to create and configure the virtual network adapter and system routes.\n\nUse 'Restart as Administrator' in the app or run RustyBox with elevated privileges."
         );
       } else {
         alert("Connect failed: " + msg);

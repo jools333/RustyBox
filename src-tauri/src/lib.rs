@@ -181,6 +181,15 @@ pub fn run() {
                 let _ = writeln!(f, "Event: {:?}", event);
             }
 
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = event
+            {
+                tray::show_main_window(app_handle);
+            }
+
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 // Ensure core is killed when app exits
                 if let Some(state) = app_handle.try_state::<AppState>() {

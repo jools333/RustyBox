@@ -435,6 +435,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="text"
               value={tunName}
               onChange={(e) => setTunName(e.target.value)}
+              placeholder="Auto (utun on macOS) or rustybox-tun"
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono"
             />
           </div>

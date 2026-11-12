@@ -64,8 +64,9 @@ z:\jvpn\
 ├── scripts\                  # Cross-platform build & download scripts
 │   ├── build-windows.ps1     # Windows build script
 │   ├── build-linux.sh        # Linux build script
+│   ├── build-macos.sh        # macOS build script
 │   ├── download-singbox.ps1  # Automated sing-box & wintun downloader (Windows)
-│   └── download-singbox.sh   # Automated sing-box downloader (Linux)
+│   └── download-singbox.sh   # Automated sing-box downloader (Linux & macOS)
 ├── .github\workflows\
 │   └── ci.yml                # CI/CD: fmt check, clippy (-D warnings), tests, and builds
 ├── README.md                 # User-facing and build documentation

@@ -5,9 +5,9 @@
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8D8.svg)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.78%2B-DEA584.svg)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg)](https://react.dev/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/jools333/RustyBox)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/jools333/RustyBox)
 
-**RustyBox** — это быстрый, легковесный и безопасный кроссплатформенный VPN-клиент для операционных систем Windows и Linux, построенный на базе фреймворка **Tauri 2**, языка **Rust** и **React 18 / TypeScript**.
+**RustyBox** — это быстрый, легковесный и безопасный кроссплатформенный VPN-клиент для операционных систем Windows, Linux и macOS, построенный на базе фреймворка **Tauri 2**, языка **Rust** и **React 18 / TypeScript**.
 
 В качестве высокопроизводительного сетевого ядра используется **[sing-box](https://github.com/SagerNet/sing-box)** (версии 1.14+), запускаемый в виде изолированного дочернего процесса. RustyBox направляет сетевой трафик через системный виртуальный сетевой адаптер **TUN** (`rustybox-tun` / Wintun), поддерживает протоколы **VLESS Reality**, **Shadowsocks 2022** и **OpenVPN (.ovpn)**, одновременное подключение **Dual-VPN** (основной + корпоративный туннели), гибкую настройку **MTU** (по умолчанию 1500), интеллектуальную маршрутизацию по доменным правилам (прямой трафик / VPN), перехват DNS, автоматический запрос прав администратора (UAC) на Windows и автозапуск вместе с системой.
 
@@ -34,12 +34,14 @@
 - [Системные требования](#системные-требования)
   - [Windows](#windows)
   - [Linux](#linux)
+  - [macOS](#macos)
 - [Сборка из исходного кода](#сборка-из-исходного-кода)
   - [Автоматическая сборка скриптами](#автоматическая-сборка-скриптами)
   - [Ручная пошаговая сборка](#ручная-пошаговая-сборка)
 - [Сетевые драйверы и права доступа](#сетевые-драйверы-и-права-доступа)
   - [Windows (Wintun и UAC)](#windows-wintundll-и-права-администратора)
   - [Linux (TUN и Capabilities)](#linux-tun-и-права-cap_net_admin)
+  - [macOS (utun и права администратора)](#macos-utun-и-права-администратора)
 - [Руководство пользователя](#руководство-пользователя)
   - [Импорт профилей (VLESS / Shadowsocks)](#импорт-профилей)
   - [Подключение и отключение](#подключение-и-отключение)
@@ -86,7 +88,7 @@
   - **Встроенные обновления**: проверка и установка релизов с GitHub Releases в один клик с проверкой криптографической подписи Minisign / Ed25519.
 - **Безопасность и конфиденциальность**:
   - **Маскирование секретов**: все UUID, пароли, приватные ключи REALITY и base64-токены автоматически маскируются (`[REDACTED_UUID]`, `[REDACTED_SECRET]`, `[REDACTED_KEY]`) в оперативной памяти, в отображаемом журнале логов и при экспорте диагностических отчетов.
-  - **Надежное хранение конфигурации**: пользовательские настройки и профили сохраняются в системной папке приложения (`%APPDATA%/rustybox` на Windows, `~/.config/rustybox` на Linux) с автоматическим резервным копированием при повреждении файлов (`config.json.corrupted.<timestamp>`).
+  - **Надежное хранение конфигурации**: пользовательские настройки и профили сохраняются в системной папке приложения (`%APPDATA%/rustybox` на Windows, `~/.config/rustybox` на Linux, `~/Library/Application Support/rustybox` на macOS) с автоматическим резервным копированием при повреждении файлов (`config.json.corrupted.<timestamp>`).
 
 ---
 
@@ -121,7 +123,7 @@ graph TD
 ```
 
 1. **Frontend (React 18 / TypeScript)**:
-   - Презентационный слой в WebView2 (Windows) или WebKitGTK (Linux).
+   - Презентационный слой в WebView2 (Windows), WebKitGTK (Linux) или WKWebView (macOS).
    - Интуитивный интерфейс с темной темой, отображением аптайма, списком профилей с замером задержки, редактором правил маршрутизации, журналом логов и настройками.
 2. **Backend (Rust & Tauri 2)**:
    - Управление состоянием (`AppState`), защищенное асинхронными мьютексами `tokio::sync::Mutex`.
@@ -170,6 +172,12 @@ graph TD
     librsvg2-dev
   ```
 
+### macOS
+- **Операционная система**: macOS 10.15 (Catalina) или новее (Apple Silicon `arm64` и Intel `x86_64`).
+- **Драйвер TUN**: используется встроенный системный драйвер ядра `utun` (дополнительные драйверы не требуются).
+- **Права администратора**: требуются для создания интерфейса `utun` и настройки маршрутов/DNS (`Restart as Administrator` через нативный диалог macOS или запуск с `sudo`).
+- **Инструменты для сборки**: Xcode Command Line Tools (`xcode-select --install`), Rust и Node.js 20+.
+
 ---
 
 ## Сборка из исходного кода
@@ -201,6 +209,19 @@ chmod +x scripts/*.sh
 
 # 3. Сборка релизного бинарника
 ./scripts/build-linux.sh release
+```
+
+#### macOS (Bash / Zsh)
+```bash
+# 1. Загрузка sing-box в bin/ (поддерживаются arm64 и x86_64)
+chmod +x scripts/*.sh
+./scripts/download-singbox.sh
+
+# 2. Сборка debug-бинарника
+./scripts/build-macos.sh debug
+
+# 3. Сборка релизного бинарника
+./scripts/build-macos.sh release
 ```
 
 ### Ручная пошаговая сборка
@@ -245,6 +266,11 @@ sudo setcap cap_net_admin,cap_net_bind_service=+ep bin/sing-box
 ```bash
 sudo chmod 666 /dev/net/tun
 ```
+
+### macOS (`utun` и права администратора)
+1. macOS использует встроенный драйвер `utun` — отдельный драйвер устанавливать не нужно.
+2. По умолчанию на macOS имя интерфейса оставляется пустым (система автоматически выделяет свободный `utunN`), либо можно явно задать имя формата `utun[0-9]+` (например, `utun9`).
+3. Для настройки `utun`, маршрутов и DNS требуются права администратора (`root`). Нажмите кнопку **«Restart as Administrator»** на главном экране для перезапуска через стандартный диалог аутентификации macOS (пароль / Touch ID).
 
 ---
 

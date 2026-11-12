@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.1.18)'
+        description: 'Release tag (e.g. v0.1.19)'
         required: true
-        default: 'v0.1.18'
+        default: 'v0.1.19'
 
 permissions:
   contents: write
@@ -35,7 +35,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
           name: "RustyBox ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
-          body: 'Automated release of RustyBox desktop VPN client for Windows (.exe / .msi) and Linux (.deb / .AppImage).'
+          body: 'Automated release of RustyBox desktop VPN client for Windows (.exe / .msi), Linux (.deb / .AppImage), and macOS (.dmg / .app).'
           draft: false
           prerelease: false
 
@@ -53,6 +53,16 @@ jobs:
           - platform: 'linux-x86_64'
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+          - platform: 'macos-aarch64'
+            os: macos-latest
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+            singbox_arch: 'arm64'
+          - platform: 'macos-x86_64'
+            os: macos-latest
+            target: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin'
+            singbox_arch: 'amd64'
 
     steps:
       - name: Checkout repository
@@ -82,11 +92,11 @@ jobs:
         run: |
           .\scripts\download-singbox.ps1
 
-      - name: Download sing-box (Linux)
-        if: matrix.os == 'ubuntu-22.04'
+      - name: Download sing-box (Linux / macOS)
+        if: matrix.os == 'ubuntu-22.04' || matrix.os == 'macos-latest'
         run: |
           chmod +x ./scripts/download-singbox.sh
-          ./scripts/download-singbox.sh
+          ./scripts/download-singbox.sh 1.14.3 bin ${{ matrix.singbox_arch || '' }}
 
       - name: Install frontend dependencies
         run: |
@@ -100,9 +110,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tauriScript: "npx @tauri-apps/cli"
+          args: ${{ matrix.args || '' }}
           releaseId: ${{ needs.create-release.outputs.release_id }}
           tagName: "${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
           releaseName: "RustyBox ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
-          releaseBody: 'Automated release of RustyBox desktop VPN client for Windows (.exe / .msi) and Linux (.deb / .AppImage).'
+          releaseBody: 'Automated release of RustyBox desktop VPN client for Windows (.exe / .msi), Linux (.deb / .AppImage), and macOS (.dmg / .app).'
           releaseDraft: false
           prerelease: false

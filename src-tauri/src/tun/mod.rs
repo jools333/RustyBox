@@ -143,26 +143,64 @@ impl TunManager {
             }
         }
 
-        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        #[cfg(target_os = "macos")]
         {
-            details.push("Operating system is not Windows or Linux".to_string());
+            has_driver = true;
+            details.push("Built-in macOS utun kernel driver available.".to_string());
+            if is_elevated {
+                details.push("Elevation check passed (root privileges detected).".to_string());
+            } else {
+                details.push(
+                    "Administrator (root) privileges required for TUN network operations on macOS."
+                        .to_string(),
+                );
+            }
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        {
+            details.push("Operating system is not Windows, Linux, or macOS".to_string());
         }
 
         TunPrerequisites {
-            is_supported: true,
+            is_supported: cfg!(any(
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "macos"
+            )),
             has_driver,
             is_elevated,
             details,
         }
     }
 
+    /// Resolves the TUN interface name for sing-box.
+    ///
+    /// On macOS (Darwin), kernel `utun` interfaces must be named `utun[0-9]+` or omitted
+    /// so the kernel auto-assigns an available slot. Non-utun names (such as `rustybox-tun`)
+    /// are omitted on macOS to avoid `invalid utun interface name` failures.
+    pub fn resolve_tun_interface_name(interface_name: &str, is_macos: bool) -> Option<String> {
+        let trimmed = interface_name.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if is_macos {
+            if let Some(suffix) = trimmed.strip_prefix("utun") {
+                if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                    return Some(trimmed.to_string());
+                }
+            }
+            return None;
+        }
+        Some(trimmed.to_string())
+    }
+
     /// Generates sing-box JSON inbound block for TUN
     pub fn generate_tun_inbound(&self, interface_name: &str, mtu: u32) -> serde_json::Value {
         let effective_mtu = if mtu == 0 { 1500 } else { mtu };
-        serde_json::json!({
+        let mut inbound = serde_json::json!({
             "type": "tun",
             "tag": "tun-in",
-            "interface_name": interface_name,
             "mtu": effective_mtu,
             "address": [
                 "172.19.0.1/30",
@@ -171,7 +209,13 @@ impl TunManager {
             "auto_route": true,
             "strict_route": true,
             "stack": "mixed"
-        })
+        });
+        if let Some(name) =
+            Self::resolve_tun_interface_name(interface_name, cfg!(target_os = "macos"))
+        {
+            inbound["interface_name"] = serde_json::json!(name);
+        }
+        inbound
     }
 
     /// Removes any orphaned or disconnected Wintun / sing-tun network adapters
@@ -438,7 +482,15 @@ pub fn check_elevation() -> bool {
         libc_or_zero() == 0 || current_process_has_cap_net_admin()
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        extern "C" {
+            fn geteuid() -> u32;
+        }
+        unsafe { geteuid() == 0 }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
         false
     }
@@ -534,7 +586,10 @@ mod tests {
         let mgr = TunManager::new();
         let inbound = mgr.generate_tun_inbound("rustybox-tun", 1500);
         assert_eq!(inbound["type"], "tun");
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(inbound["interface_name"], "rustybox-tun");
+        #[cfg(target_os = "macos")]
+        assert!(inbound.get("interface_name").is_none());
         assert_eq!(inbound["mtu"], 1500);
         assert_eq!(inbound["auto_route"], true);
         assert_eq!(inbound["strict_route"], true);
@@ -548,6 +603,32 @@ mod tests {
         // Custom MTU
         let inbound_custom = mgr.generate_tun_inbound("rustybox-tun", 1420);
         assert_eq!(inbound_custom["mtu"], 1420);
+    }
+
+    #[test]
+    fn test_resolve_tun_interface_name() {
+        // Windows / Linux
+        assert_eq!(
+            TunManager::resolve_tun_interface_name("rustybox-tun", false),
+            Some("rustybox-tun".to_string())
+        );
+        assert_eq!(TunManager::resolve_tun_interface_name("  ", false), None);
+
+        // macOS
+        assert_eq!(
+            TunManager::resolve_tun_interface_name("rustybox-tun", true),
+            None
+        );
+        assert_eq!(TunManager::resolve_tun_interface_name("", true), None);
+        assert_eq!(TunManager::resolve_tun_interface_name("utun", true), None);
+        assert_eq!(
+            TunManager::resolve_tun_interface_name("utun9", true),
+            Some("utun9".to_string())
+        );
+        assert_eq!(
+            TunManager::resolve_tun_interface_name("utun12", true),
+            Some("utun12".to_string())
+        );
     }
 
     #[test]
