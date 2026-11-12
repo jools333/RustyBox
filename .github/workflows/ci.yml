@@ -60,9 +60,10 @@ jobs:
           ./scripts/download-singbox.sh
 
       - name: Build Frontend
-        working-directory: frontend
+        shell: bash
         run: |
-          npm ci
+          rm -f package-lock.json frontend/package-lock.json
+          npm install --no-audit --no-fund
           npm run build
 
       - name: Check formatting

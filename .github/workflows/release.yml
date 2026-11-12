@@ -99,9 +99,10 @@ jobs:
           ./scripts/download-singbox.sh 1.14.3 bin ${{ matrix.singbox_arch || '' }}
 
       - name: Install frontend dependencies
+        shell: bash
         run: |
-          cd frontend
-          npm ci
+          rm -f package-lock.json frontend/package-lock.json
+          npm install --no-audit --no-fund
 
       - name: Build Tauri app & publish release
         uses: tauri-apps/tauri-action@v0
