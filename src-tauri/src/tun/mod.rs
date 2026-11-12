@@ -19,7 +19,7 @@ impl TunManager {
 
     pub fn check_prerequisites(&self, singbox_binary_path: Option<&Path>) -> TunPrerequisites {
         let mut details = Vec::new();
-        let mut has_driver = false;
+        let has_driver: bool;
         #[allow(unused_mut)]
         let mut is_elevated = check_elevation();
 
@@ -79,9 +79,8 @@ impl TunManager {
                 }
             }
 
-            if driver_found {
-                has_driver = true;
-            } else {
+            has_driver = driver_found;
+            if !driver_found {
                 details.push(
                     "wintun.dll not found. Please place wintun.dll alongside sing-box.exe"
                         .to_string(),
@@ -103,6 +102,7 @@ impl TunManager {
                 has_driver = true;
                 details.push("Found /dev/net/tun device".to_string());
             } else {
+                has_driver = false;
                 details.push("/dev/net/tun device not found. Ensure tun kernel module is loaded: modprobe tun".to_string());
             }
 
@@ -159,6 +159,7 @@ impl TunManager {
 
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
+            has_driver = false;
             details.push("Operating system is not Windows, Linux, or macOS".to_string());
         }
 
