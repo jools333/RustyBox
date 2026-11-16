@@ -683,6 +683,35 @@ impl CoreManager {
         }
     }
 
+    /// Returns CIDRs for the VPN server address(es), used by the TUN
+    /// `route_exclude_address` option. Without this, sing-box's own outbound
+    /// connection to the server is captured by its own auto_route TUN.
+    fn server_exclude_cidrs(server: &str) -> Vec<String> {
+        use std::net::{IpAddr, ToSocketAddrs};
+
+        fn to_cidr(ip: IpAddr) -> String {
+            match ip {
+                IpAddr::V4(v4) => format!("{}/32", v4),
+                IpAddr::V6(v6) => format!("{}/128", v6),
+            }
+        }
+
+        if let Ok(ip) = server.parse::<IpAddr>() {
+            return vec![to_cidr(ip)];
+        }
+
+        let mut result = Vec::new();
+        if let Ok(addrs) = (server, 0).to_socket_addrs() {
+            for addr in addrs {
+                let cidr = to_cidr(addr.ip());
+                if !result.contains(&cidr) {
+                    result.push(cidr);
+                }
+            }
+        }
+        result
+    }
+
     fn add_server_bypass(
         server: &str,
         route_rules: &mut Vec<serde_json::Value>,
@@ -849,9 +878,38 @@ impl CoreManager {
         let effective_mtu = profile
             .mtu
             .unwrap_or(if tun_mtu == 0 { 1500 } else { tun_mtu });
-        let tun_inbound = self
-            .tun_manager
-            .generate_tun_inbound(tun_interface_name, effective_mtu);
+
+        // Keep the VPN server itself outside the TUN. auto_route makes the TUN
+        // the default route, so without these exclusions the core's own outbound
+        // connection to the server would loop back into the TUN.
+        let mut route_exclude_address = Vec::new();
+        let mut servers = vec![profile.server.as_str()];
+        if let Some(work) = work_profile {
+            servers.push(work.server.as_str());
+        }
+        for server in servers {
+            let cidrs = Self::server_exclude_cidrs(server);
+            if cidrs.is_empty() {
+                self.log_manager.add_log(
+                    "warn",
+                    &format!(
+                        "Could not resolve VPN server '{}' for TUN route exclusion",
+                        server
+                    ),
+                );
+            }
+            for cidr in cidrs {
+                if !route_exclude_address.contains(&cidr) {
+                    route_exclude_address.push(cidr);
+                }
+            }
+        }
+
+        let tun_inbound = self.tun_manager.generate_tun_inbound(
+            tun_interface_name,
+            effective_mtu,
+            &route_exclude_address,
+        );
 
         let remote_dns_val = if remote_dns.is_empty() {
             "1.1.1.1"
@@ -1347,6 +1405,10 @@ mod tests {
 
         assert_eq!(config["dns"]["servers"][0]["tag"], "dns-remote");
         assert_eq!(config["inbounds"][0]["mtu"], 1500);
+        assert_eq!(
+            config["inbounds"][0]["route_exclude_address"],
+            serde_json::json!(["1.2.3.4/32"])
+        );
         assert_eq!(config["outbounds"][0]["type"], "vless");
         assert_eq!(
             config["outbounds"][0]["uuid"],

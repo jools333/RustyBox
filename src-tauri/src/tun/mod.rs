@@ -196,8 +196,18 @@ impl TunManager {
         Some(trimmed.to_string())
     }
 
-    /// Generates sing-box JSON inbound block for TUN
-    pub fn generate_tun_inbound(&self, interface_name: &str, mtu: u32) -> serde_json::Value {
+    /// Generates sing-box JSON inbound block for TUN.
+    ///
+    /// `route_exclude_address` must contain the VPN server IPs (CIDR form).
+    /// With `auto_route`/`strict_route` the TUN becomes the default route; without
+    /// this exclusion sing-box's own outbound connection to the server is routed
+    /// back into its own TUN and times out.
+    pub fn generate_tun_inbound(
+        &self,
+        interface_name: &str,
+        mtu: u32,
+        route_exclude_address: &[String],
+    ) -> serde_json::Value {
         let effective_mtu = if mtu == 0 { 1500 } else { mtu };
         let mut inbound = serde_json::json!({
             "type": "tun",
@@ -211,6 +221,9 @@ impl TunManager {
             "strict_route": true,
             "stack": "mixed"
         });
+        if !route_exclude_address.is_empty() {
+            inbound["route_exclude_address"] = serde_json::json!(route_exclude_address);
+        }
         if let Some(name) =
             Self::resolve_tun_interface_name(interface_name, cfg!(target_os = "macos"))
         {
@@ -223,6 +236,37 @@ impl TunManager {
     /// and conflicting IP addresses left over from an abrupt termination or crash.
     pub fn cleanup_stale_adapter(&self, interface_name: &str) {
         let _ = interface_name;
+        #[cfg(target_os = "linux")]
+        {
+            // Remove an orphaned TUN left by a previous crash, together with the
+            // policy-routing rules/table installed by sing-box auto_route.
+            let iface_exists = std::process::Command::new("ip")
+                .args(["link", "show", interface_name])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if iface_exists {
+                let _ = std::process::Command::new("ip")
+                    .args(["link", "delete", interface_name])
+                    .output();
+            }
+
+            for priority in ["9000", "9001", "9002", "9003"] {
+                for _ in 0..4 {
+                    let removed = std::process::Command::new("ip")
+                        .args(["rule", "del", "priority", priority])
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+                    if !removed {
+                        break;
+                    }
+                }
+            }
+            let _ = std::process::Command::new("ip")
+                .args(["route", "flush", "table", "2022"])
+                .output();
+        }
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
@@ -585,7 +629,7 @@ mod tests {
     #[test]
     fn test_generate_tun_inbound() {
         let mgr = TunManager::new();
-        let inbound = mgr.generate_tun_inbound("rustybox-tun", 1500);
+        let inbound = mgr.generate_tun_inbound("rustybox-tun", 1500, &[]);
         assert_eq!(inbound["type"], "tun");
         #[cfg(not(target_os = "macos"))]
         assert_eq!(inbound["interface_name"], "rustybox-tun");
@@ -596,14 +640,26 @@ mod tests {
         assert_eq!(inbound["strict_route"], true);
         assert_eq!(inbound["stack"], "mixed");
         assert!(inbound["address"].is_array());
+        assert!(inbound.get("route_exclude_address").is_none());
 
         // Zero MTU falls back to 1500
-        let inbound_default = mgr.generate_tun_inbound("rustybox-tun", 0);
+        let inbound_default = mgr.generate_tun_inbound("rustybox-tun", 0, &[]);
         assert_eq!(inbound_default["mtu"], 1500);
 
         // Custom MTU
-        let inbound_custom = mgr.generate_tun_inbound("rustybox-tun", 1420);
+        let inbound_custom = mgr.generate_tun_inbound("rustybox-tun", 1420, &[]);
         assert_eq!(inbound_custom["mtu"], 1420);
+
+        // Server addresses are excluded from the TUN route
+        let inbound_excluded = mgr.generate_tun_inbound(
+            "rustybox-tun",
+            1500,
+            &["1.2.3.4/32".to_string(), "2001:db8::1/128".to_string()],
+        );
+        assert_eq!(
+            inbound_excluded["route_exclude_address"],
+            serde_json::json!(["1.2.3.4/32", "2001:db8::1/128"])
+        );
     }
 
     #[test]
