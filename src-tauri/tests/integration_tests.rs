@@ -1,4 +1,4 @@
-use rustybox_lib::config::{ConfigManager, DnsMode, RoutingMode};
+use rustybox_lib::config::{ConfigManager, RoutingMode};
 use rustybox_lib::core::CoreManager;
 use rustybox_lib::logging::{mask_secrets, LogManager};
 use rustybox_lib::profiles::{
@@ -200,8 +200,6 @@ fn test_scenario_07_singbox_config_generation() {
         "rustybox-tun",
         1500,
         "info",
-        DnsMode::Vpn,
-        true,
     );
 
     // Validate 1.14 structure:
@@ -444,8 +442,6 @@ verb 3
         "rustybox-tun",
         1500,
         "info",
-        DnsMode::Vpn,
-        true,
     );
 
     assert_eq!(cfg["inbounds"][0]["mtu"], 1500);
@@ -514,8 +510,6 @@ async fn test_scenario_15_dual_vpn_split_tunnel_routing() {
         "rustybox-tun",
         1500,
         "info",
-        DnsMode::Vpn,
-        true,
     );
 
     assert_eq!(cfg["inbounds"][0]["mtu"], 1500);

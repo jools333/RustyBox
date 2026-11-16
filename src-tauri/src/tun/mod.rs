@@ -207,18 +207,16 @@ impl TunManager {
         interface_name: &str,
         mtu: u32,
         route_exclude_address: &[String],
-        tun_ipv6: bool,
     ) -> serde_json::Value {
         let effective_mtu = if mtu == 0 { 1500 } else { mtu };
-        let mut addresses = vec![serde_json::json!("172.19.0.1/30")];
-        if tun_ipv6 {
-            addresses.push(serde_json::json!("fdfe:dcba:9876::1/126"));
-        }
         let mut inbound = serde_json::json!({
             "type": "tun",
             "tag": "tun-in",
             "mtu": effective_mtu,
-            "address": addresses,
+            "address": [
+                "172.19.0.1/30",
+                "fdfe:dcba:9876::1/126"
+            ],
             "auto_route": true,
             "strict_route": true,
             "stack": "mixed"
@@ -631,7 +629,7 @@ mod tests {
     #[test]
     fn test_generate_tun_inbound() {
         let mgr = TunManager::new();
-        let inbound = mgr.generate_tun_inbound("rustybox-tun", 1500, &[], true);
+        let inbound = mgr.generate_tun_inbound("rustybox-tun", 1500, &[]);
         assert_eq!(inbound["type"], "tun");
         #[cfg(not(target_os = "macos"))]
         assert_eq!(inbound["interface_name"], "rustybox-tun");
@@ -645,11 +643,11 @@ mod tests {
         assert!(inbound.get("route_exclude_address").is_none());
 
         // Zero MTU falls back to 1500
-        let inbound_default = mgr.generate_tun_inbound("rustybox-tun", 0, &[], true);
+        let inbound_default = mgr.generate_tun_inbound("rustybox-tun", 0, &[]);
         assert_eq!(inbound_default["mtu"], 1500);
 
         // Custom MTU
-        let inbound_custom = mgr.generate_tun_inbound("rustybox-tun", 1420, &[], true);
+        let inbound_custom = mgr.generate_tun_inbound("rustybox-tun", 1420, &[]);
         assert_eq!(inbound_custom["mtu"], 1420);
 
         // Server addresses are excluded from the TUN route
@@ -657,19 +655,10 @@ mod tests {
             "rustybox-tun",
             1500,
             &["1.2.3.4/32".to_string(), "2001:db8::1/128".to_string()],
-            true,
         );
         assert_eq!(
             inbound_excluded["route_exclude_address"],
             serde_json::json!(["1.2.3.4/32", "2001:db8::1/128"])
-        );
-
-        // IPv6 can be disabled for hosts where adding an IPv6 address to the
-        // TUN fails with EPERM (some kernels/containers/NetworkManager setups).
-        let inbound_no_ipv6 = mgr.generate_tun_inbound("rustybox-tun", 1500, &[], false);
-        assert_eq!(
-            inbound_no_ipv6["address"],
-            serde_json::json!(["172.19.0.1/30"])
         );
     }
 

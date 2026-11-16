@@ -1,14 +1,11 @@
-use crate::config::{ConfigManager, DnsMode, RoutingMode};
+use crate::config::ConfigManager;
 use crate::core::CoreManager;
 use crate::logging::LogManager;
 use crate::profiles::{Profile, ProfileManager, ProtocolConfig};
-use crate::routing::{RoutingManager, RuleAction};
+use crate::routing::RoutingManager;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq)]
@@ -55,7 +52,6 @@ pub struct ConnectionManager {
     config_manager: ConfigManager,
     core_manager: CoreManager,
     log_manager: LogManager,
-    health_stop: Arc<RwLock<Option<Arc<AtomicBool>>>>,
 }
 
 impl ConnectionManager {
@@ -75,7 +71,6 @@ impl ConnectionManager {
             config_manager,
             core_manager,
             log_manager,
-            health_stop: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -151,7 +146,6 @@ impl ConnectionManager {
         if let Ok(mut lock) = self.last_error.write() {
             *lock = None;
         }
-        self.stop_health_watchdog();
         self.log_manager
             .add_log("info", "Initiating VPN connection...");
 
@@ -220,256 +214,53 @@ impl ConnectionManager {
             );
         }
 
-        // A hostname that cannot be resolved means the core's own traffic
-        // cannot be excluded from the TUN.  Starting anyway creates a routing
-        // loop; with DNS hijacking enabled it also takes the whole system's
-        // name resolution down.  Fail fast with an actionable message.
-        self.ensure_server_resolvable(&profile)?;
-        if let Some(ref work) = work_profile {
-            self.ensure_server_resolvable(work)?;
-        }
-
         let rules = self.routing_manager.get_rules();
-        let final_is_proxy = match cfg.routing_mode {
-            RoutingMode::GlobalVpn => true,
-            RoutingMode::GlobalDirect => false,
-            RoutingMode::DomainRules => cfg.default_route_action == RuleAction::Vpn,
-        };
-
-        self.log_manager.add_log(
-            "info",
-            &format!(
-                "DNS mode: {} (LAN DNS stays outside the tunnel: {}, health check: {})",
-                cfg.dns_mode.as_str(),
-                cfg.dns_mode != DnsMode::Vpn,
-                cfg.health_check
-            ),
+        let singbox_config = self.core_manager.generate_singbox_config(
+            &profile,
+            work_profile.as_ref(),
+            cfg.routing_mode,
+            cfg.default_route_action,
+            &rules,
+            &cfg.remote_dns,
+            &cfg.direct_dns,
+            &cfg.tun_interface_name,
+            cfg.tun_mtu,
+            &cfg.log_level,
         );
 
-        let mut tun_ipv6 = cfg.tun_ipv6;
-        let mut retried_without_ipv6 = false;
-        loop {
-            let singbox_config = self.core_manager.generate_singbox_config(
-                &profile,
-                work_profile.as_ref(),
-                cfg.routing_mode,
-                cfg.default_route_action,
-                &rules,
-                &cfg.remote_dns,
-                &cfg.direct_dns,
-                &cfg.tun_interface_name,
-                cfg.tun_mtu,
-                &cfg.log_level,
-                cfg.dns_mode,
-                tun_ipv6,
-            );
-
-            match self.core_manager.start_core(singbox_config).await {
-                Ok(_) => break,
-                Err(e) => {
-                    let err_text = e.to_string();
-
-                    // Some kernels / container / NetworkManager setups reject
-                    // adding an IPv6 address to a TUN device with EPERM.  The
-                    // VPN works fine over IPv4, so retry once without IPv6.
-                    if tun_ipv6
-                        && !retried_without_ipv6
-                        && err_text.contains("add address")
-                        && err_text.contains("permission denied")
-                    {
-                        self.log_manager.add_log(
-                            "warn",
-                            "Could not add the IPv6 address to the TUN (permission denied); retrying without IPv6",
-                        );
-                        tun_ipv6 = false;
-                        retried_without_ipv6 = true;
-                        let _ = self.core_manager.stop_core().await;
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        continue;
-                    }
-
-                    let err_msg = format!("VPN core start failed: {}", e);
-                    self.set_error(&err_msg);
-                    return Err(VpnError::Core(err_text));
+        match self.core_manager.start_core(singbox_config).await {
+            Ok(_) => {
+                if let Ok(mut state) = self.state.write() {
+                    *state = ConnectionState::Connected;
                 }
-            }
-        }
-
-        // Drop any negative/cached answers from before the connection.  This
-        // is especially important when the previous attempt failed DNS.
-        flush_dns_cache();
-
-        // Do not report "Connected" while the tunnel is silently dead.  This is
-        // exactly the failure mode where sing-box is running but its upstream
-        // server stopped passing traffic: pages hang and DNS dies.
-        if cfg.health_check {
-            self.log_manager.add_log("info", "Checking VPN health...");
-            let mut healthy = false;
-            for attempt in 1..=2 {
-                tokio::time::sleep(Duration::from_secs(if attempt == 1 { 3 } else { 4 })).await;
-                if self.health_check(final_is_proxy, cfg.dns_mode).await {
-                    healthy = true;
-                    break;
+                if let Ok(mut lock) = self.connected_since.write() {
+                    *lock = Some(Utc::now());
                 }
-                self.log_manager.add_log(
-                    "warn",
-                    &format!("VPN health check failed (attempt {}/2)", attempt),
-                );
-            }
-
-            if !healthy {
-                let _ = self.core_manager.stop_core().await;
-                flush_dns_cache();
-                let msg = "VPN connected, but the tunnel is not passing traffic or DNS does not work. Disconnected to restore direct network access.";
-                self.set_error(msg);
-                return Err(VpnError::Core(msg.to_string()));
-            }
-        }
-
-        if let Ok(mut state) = self.state.write() {
-            *state = ConnectionState::Connected;
-        }
-        if let Ok(mut lock) = self.connected_since.write() {
-            *lock = Some(Utc::now());
-        }
-        if let Some(ref work) = work_profile {
-            self.log_manager.add_log(
-                "info",
-                &format!(
-                    "Dual-VPN connected: Primary '{}' + Work '{}'",
-                    profile.name, work.name
-                ),
-            );
-        } else {
-            self.log_manager.add_log(
-                "info",
-                &format!("VPN connected successfully to '{}'", profile.name),
-            );
-        }
-
-        self.start_health_watchdog(final_is_proxy, cfg.dns_mode, cfg.health_check);
-        Ok(())
-    }
-
-    fn ensure_server_resolvable(&self, profile: &Profile) -> Result<(), VpnError> {
-        if profile.server.parse::<std::net::IpAddr>().is_ok() {
-            return Ok(());
-        }
-
-        if CoreManager::server_exclude_cidrs(&profile.server).is_empty() {
-            let msg = format!(
-                "Cannot resolve VPN server '{}'. Check DNS settings or use the server IP address in the profile.",
-                profile.server
-            );
-            self.set_error(&msg);
-            return Err(VpnError::Core(msg));
-        }
-
-        Ok(())
-    }
-
-    async fn health_check(&self, final_is_proxy: bool, dns_mode: DnsMode) -> bool {
-        // Test the tunnel itself with a TCP connection.  The TUN is the default
-        // route, so this connection is proxied by sing-box; if the upstream is
-        // dead it times out.  Probe several well-known destinations in
-        // parallel to avoid a false positive when one is blocked server-side.
-        if final_is_proxy {
-            let tunnel_ok = tokio::task::spawn_blocking(|| {
-                const TARGETS: [&str; 3] = ["1.1.1.1", "8.8.8.8", "77.88.8.8"];
-                std::thread::scope(|scope| {
-                    let handles: Vec<_> = TARGETS
-                        .iter()
-                        .map(|ip| {
-                            scope.spawn(move || tcp_reachable(ip, 443, Duration::from_secs(4)))
-                        })
-                        .collect();
-                    handles
-                        .into_iter()
-                        .any(|handle| handle.join().unwrap_or(false))
-                })
-            })
-            .await
-            .unwrap_or(false);
-
-            if !tunnel_ok {
-                return false;
-            }
-        }
-
-        // In VPN-only DNS mode the system resolver depends on the tunnel.
-        // In auto/direct mode LAN DNS is deliberately independent, so a
-        // failure here would be a separate local-DNS problem.
-        if dns_mode == DnsMode::Vpn {
-            let dns_ok = tokio::time::timeout(
-                Duration::from_secs(8),
-                tokio::task::spawn_blocking(|| {
-                    ("example.com", 0)
-                        .to_socket_addrs()
-                        .map(|mut addrs| addrs.next().is_some())
-                        .unwrap_or(false)
-                }),
-            )
-            .await;
-            return matches!(dns_ok, Ok(Ok(true)));
-        }
-
-        true
-    }
-
-    fn stop_health_watchdog(&self) {
-        if let Ok(mut guard) = self.health_stop.write() {
-            if let Some(flag) = guard.take() {
-                flag.store(true, Ordering::Relaxed);
-            }
-        }
-    }
-
-    fn start_health_watchdog(&self, final_is_proxy: bool, dns_mode: DnsMode, enabled: bool) {
-        self.stop_health_watchdog();
-        if !enabled {
-            return;
-        }
-
-        let stop = Arc::new(AtomicBool::new(false));
-        if let Ok(mut guard) = self.health_stop.write() {
-            *guard = Some(stop.clone());
-        }
-
-        let this = self.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(20)).await;
-            let mut failures = 0u8;
-            while !stop.load(Ordering::Relaxed) {
-                if this.get_state() != ConnectionState::Connected {
-                    break;
-                }
-
-                if this.health_check(final_is_proxy, dns_mode).await {
-                    failures = 0;
+                if let Some(ref work) = work_profile {
+                    self.log_manager.add_log(
+                        "info",
+                        &format!(
+                            "Dual-VPN connected: Primary '{}' + Work '{}'",
+                            profile.name, work.name
+                        ),
+                    );
                 } else {
-                    failures += 1;
-                    this.log_manager
-                        .add_log("warn", &format!("VPN health check failed ({}/2)", failures));
-                    if failures >= 2 {
-                        this.log_manager.add_log(
-                            "error",
-                            "VPN tunnel stopped passing traffic; disconnecting to restore direct DNS and internet access",
-                        );
-                        let _ = this.disconnect().await;
-                        this.set_error(
-                            "VPN tunnel stopped passing traffic; disconnected automatically to restore DNS/internet",
-                        );
-                        break;
-                    }
+                    self.log_manager.add_log(
+                        "info",
+                        &format!("VPN connected successfully to '{}'", profile.name),
+                    );
                 }
-
-                tokio::time::sleep(Duration::from_secs(20)).await;
+                Ok(())
             }
-        });
+            Err(e) => {
+                let err_msg = format!("VPN core start failed: {}", e);
+                self.set_error(&err_msg);
+                Err(VpnError::Core(e.to_string()))
+            }
+        }
     }
 
     pub async fn disconnect(&self) -> Result<(), VpnError> {
-        self.stop_health_watchdog();
         {
             let mut state = self
                 .state
@@ -498,7 +289,6 @@ impl ConnectionManager {
         self.log_manager.add_log("info", "Disconnecting VPN...");
 
         let res = self.core_manager.stop_core().await;
-        flush_dns_cache();
 
         if let Ok(mut state) = self.state.write() {
             *state = ConnectionState::Disconnected;
@@ -573,47 +363,6 @@ impl ConnectionManager {
         }
         self.log_manager.add_log("error", message);
     }
-}
-
-/// Best-effort DNS cache flush.  After a failed VPN session the system resolver
-/// may keep negative answers for a while, making it look like DNS is still
-/// broken even though the tunnel is already gone.
-fn flush_dns_cache() {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("resolvectl")
-            .arg("flush-caches")
-            .status();
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let _ = std::process::Command::new("ipconfig")
-            .arg("/flushdns")
-            .status();
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("dscacheutil")
-            .arg("-flushcache")
-            .status();
-        let _ = std::process::Command::new("killall")
-            .args(["-HUP", "mDNSResponder"])
-            .status();
-    }
-}
-
-/// Best-effort TCP reachability check used by the health watchdog.
-///
-/// The address is deliberately parsed as a literal so this never performs a
-/// DNS lookup itself (a dead DNS server must not make the health check hang).
-fn tcp_reachable(ip: &str, port: u16, timeout: Duration) -> bool {
-    let addr: SocketAddr = match format!("{}:{}", ip, port).parse() {
-        Ok(addr) => addr,
-        Err(_) => return false,
-    };
-    TcpStream::connect_timeout(&addr, timeout).is_ok()
 }
 
 #[cfg(test)]

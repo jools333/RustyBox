@@ -1,4 +1,4 @@
-use crate::config::{DnsMode, RoutingMode};
+use crate::config::RoutingMode;
 use crate::logging::LogManager;
 use crate::profiles::{Profile, ProtocolConfig};
 use crate::routing::{RoutingRule, RuleAction};
@@ -686,7 +686,7 @@ impl CoreManager {
     /// Returns CIDRs for the VPN server address(es), used by the TUN
     /// `route_exclude_address` option. Without this, sing-box's own outbound
     /// connection to the server is captured by its own auto_route TUN.
-    pub(crate) fn server_exclude_cidrs(server: &str) -> Vec<String> {
+    fn server_exclude_cidrs(server: &str) -> Vec<String> {
         use std::net::{IpAddr, ToSocketAddrs};
 
         fn to_cidr(ip: IpAddr) -> String {
@@ -751,8 +751,6 @@ impl CoreManager {
         tun_interface_name: &str,
         tun_mtu: u32,
         log_level: &str,
-        dns_mode: DnsMode,
-        tun_ipv6: bool,
     ) -> serde_json::Value {
         let mut endpoints = Vec::new();
         let mut outbounds = Vec::new();
@@ -774,28 +772,6 @@ impl CoreManager {
         let mut route_rules = Vec::new();
 
         route_rules.push(json!({ "action": "sniff" }));
-
-        // DNS resilience.  A dead VPN tunnel must not take name resolution down
-        // with it.  In `auto` mode private/LAN resolvers (router, AdGuard, etc.)
-        // are sent directly, while public DNS still goes through the tunnel.
-        // In `direct` mode every DNS packet bypasses the tunnel.
-        match dns_mode {
-            DnsMode::Vpn => {}
-            DnsMode::Auto => {
-                route_rules.push(json!({
-                    "ip_is_private": true,
-                    "port": 53,
-                    "outbound": "direct"
-                }));
-            }
-            DnsMode::Direct => {
-                route_rules.push(json!({
-                    "port": 53,
-                    "outbound": "direct"
-                }));
-            }
-        }
-
         route_rules.push(json!({ "port": 53, "action": "hijack-dns" }));
         route_rules.push(json!({ "protocol": "dns", "action": "hijack-dns" }));
 
@@ -893,7 +869,7 @@ impl CoreManager {
             }
         };
 
-        let final_dns = if dns_mode == DnsMode::Direct || final_outbound == "direct" {
+        let final_dns = if final_outbound == "direct" {
             "dns-direct"
         } else {
             "dns-remote"
@@ -933,7 +909,6 @@ impl CoreManager {
             tun_interface_name,
             effective_mtu,
             &route_exclude_address,
-            tun_ipv6,
         );
 
         let remote_dns_val = if remote_dns.is_empty() {
@@ -1426,8 +1401,6 @@ mod tests {
             "rustybox-tun",
             1500,
             "info",
-            DnsMode::Vpn,
-            true,
         );
 
         assert_eq!(config["dns"]["servers"][0]["tag"], "dns-remote");
@@ -1449,121 +1422,6 @@ mod tests {
             let val_res = core_mgr.validate_config(&config);
             assert!(val_res.is_ok(), "Validation failed: {:?}", val_res.err());
         }
-    }
-
-    fn test_profile() -> Profile {
-        Profile::new_vless(
-            "Test".to_string(),
-            "1.2.3.4".to_string(),
-            443,
-            VlessConfig {
-                uuid: "b831381d-6324-4d53-ad4f-8cda98b3f811".to_string(),
-                flow: Some("xtls-rprx-vision".to_string()),
-                network: Some("tcp".to_string()),
-                tls: true,
-                sni: Some("example.com".to_string()),
-                fingerprint: Some("chrome".to_string()),
-                reality: true,
-                public_key: Some("enlGdIoYJfgX5TRxi5iQnDDFG-6TVwrPLtj00OdXvlM".to_string()),
-                short_id: Some("1234".to_string()),
-            },
-        )
-    }
-
-    #[test]
-    fn test_dns_mode_auto_keeps_private_dns_outside_tunnel() {
-        let core_mgr = CoreManager::new(LogManager::default());
-        let cfg = core_mgr.generate_singbox_config(
-            &test_profile(),
-            None,
-            RoutingMode::GlobalVpn,
-            RuleAction::Vpn,
-            &[],
-            "1.1.1.1",
-            "77.88.8.8",
-            "rustybox-tun",
-            1500,
-            "info",
-            DnsMode::Auto,
-            true,
-        );
-
-        let rules = cfg["route"]["rules"].as_array().unwrap();
-        let dns_direct = rules.iter().find(|r| {
-            r.get("ip_is_private").and_then(|v| v.as_bool()) == Some(true)
-                && r.get("port").and_then(|v| v.as_u64()) == Some(53)
-                && r.get("outbound").and_then(|v| v.as_str()) == Some("direct")
-        });
-        assert!(
-            dns_direct.is_some(),
-            "auto mode must route private/LAN DNS outside the tunnel"
-        );
-        assert_eq!(cfg["dns"]["final"], "dns-remote");
-
-        if core_mgr.find_binary().is_some() {
-            let res = core_mgr.validate_config(&cfg);
-            assert!(res.is_ok(), "Validation failed: {:?}", res.err());
-        }
-    }
-
-    #[test]
-    fn test_dns_mode_direct_routes_all_dns_outside_tunnel() {
-        let core_mgr = CoreManager::new(LogManager::default());
-        let cfg = core_mgr.generate_singbox_config(
-            &test_profile(),
-            None,
-            RoutingMode::GlobalVpn,
-            RuleAction::Vpn,
-            &[],
-            "1.1.1.1",
-            "77.88.8.8",
-            "rustybox-tun",
-            1500,
-            "info",
-            DnsMode::Direct,
-            true,
-        );
-
-        let rules = cfg["route"]["rules"].as_array().unwrap();
-        let all_dns_direct = rules.iter().any(|r| {
-            r.get("port").and_then(|v| v.as_u64()) == Some(53)
-                && r.get("ip_is_private").is_none()
-                && r.get("outbound").and_then(|v| v.as_str()) == Some("direct")
-        });
-        assert!(
-            all_dns_direct,
-            "direct mode must route every DNS packet outside the tunnel"
-        );
-        assert_eq!(cfg["dns"]["final"], "dns-direct");
-
-        if core_mgr.find_binary().is_some() {
-            let res = core_mgr.validate_config(&cfg);
-            assert!(res.is_ok(), "Validation failed: {:?}", res.err());
-        }
-    }
-
-    #[test]
-    fn test_generate_tun_without_ipv6() {
-        let core_mgr = CoreManager::new(LogManager::default());
-        let cfg = core_mgr.generate_singbox_config(
-            &test_profile(),
-            None,
-            RoutingMode::GlobalVpn,
-            RuleAction::Vpn,
-            &[],
-            "1.1.1.1",
-            "77.88.8.8",
-            "rustybox-tun",
-            1500,
-            "info",
-            DnsMode::Auto,
-            false,
-        );
-
-        assert_eq!(
-            cfg["inbounds"][0]["address"],
-            serde_json::json!(["172.19.0.1/30"])
-        );
     }
 
     #[test]
@@ -1597,8 +1455,6 @@ mod tests {
             "rustybox-tun",
             1500,
             "info",
-            DnsMode::Vpn,
-            true,
         );
 
         assert_eq!(config["inbounds"][0]["mtu"], 1500);
@@ -1758,8 +1614,6 @@ mod tests {
             "rustybox-tun",
             1500,
             "info",
-            DnsMode::Vpn,
-            true,
         );
 
         assert_eq!(cfg["inbounds"][0]["mtu"], 1500);
@@ -1849,8 +1703,6 @@ mod tests {
             "rustybox-tun",
             1500,
             "info",
-            DnsMode::Vpn,
-            true,
         );
 
         assert_eq!(cfg["inbounds"][0]["mtu"], 1500);
