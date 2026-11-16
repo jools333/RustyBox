@@ -38,6 +38,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [tunMtu, setTunMtu] = useState<number>(config.tun_mtu ?? 1500);
   const [remoteDns, setRemoteDns] = useState(config.remote_dns);
   const [directDns, setDirectDns] = useState(config.direct_dns);
+  const [dnsMode, setDnsMode] = useState<"vpn" | "auto" | "direct">(
+    config.dns_mode ?? "auto"
+  );
+  const [tunIpv6, setTunIpv6] = useState(config.tun_ipv6 !== false);
+  const [healthCheck, setHealthCheck] = useState(config.health_check !== false);
   const [singboxPath, setSingboxPath] = useState(config.singbox_path || "");
   const [logLevel, setLogLevel] = useState(config.log_level);
   const [savedMessage, setSavedMessage] = useState(false);
@@ -142,6 +147,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       tun_mtu: Number(tunMtu) > 0 ? Number(tunMtu) : 1500,
       remote_dns: remoteDns,
       direct_dns: directDns,
+      dns_mode: dnsMode,
+      tun_ipv6: tunIpv6,
+      health_check: healthCheck,
       singbox_path: singboxPath.trim() ? singboxPath.trim() : null,
       log_level: logLevel,
     };
@@ -483,6 +491,60 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono"
               />
             </div>
+          </div>
+
+          <div className="pt-2 border-t border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <span className="font-medium text-slate-300">DNS Mode</span>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Auto keeps private/LAN DNS outside the VPN tunnel, so name
+                  resolution survives a dead tunnel.
+                </p>
+              </div>
+              <select
+                value={dnsMode}
+                onChange={(e) =>
+                  setDnsMode(e.target.value as "vpn" | "auto" | "direct")
+                }
+                className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-200 font-mono"
+              >
+                <option value="auto">Auto (recommended)</option>
+                <option value="vpn">Via VPN only</option>
+                <option value="direct">Direct only</option>
+              </select>
+            </div>
+
+            <label className="flex items-center justify-between gap-2 cursor-pointer">
+              <div>
+                <span className="font-medium text-slate-300">IPv6 in TUN</span>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Disable if sing-box fails with “add address … permission denied”.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={tunIpv6}
+                onChange={(e) => setTunIpv6(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-orange-600 focus:ring-0 cursor-pointer"
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-2 cursor-pointer">
+              <div>
+                <span className="font-medium text-slate-300">Tunnel Health Check</span>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Verify the tunnel after connecting and disconnect automatically
+                  if it stops passing traffic.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={healthCheck}
+                onChange={(e) => setHealthCheck(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-orange-600 focus:ring-0 cursor-pointer"
+              />
+            </label>
           </div>
         </div>
 

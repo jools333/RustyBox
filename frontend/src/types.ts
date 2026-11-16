@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.19";
+export const APP_VERSION = "0.1.22";
 
 export type ConnectionState = "disconnected" | "starting" | "connected" | "stopping" | "error";
 
@@ -104,6 +104,9 @@ export interface AppConfig {
   profiles: Profile[];
   remote_dns: string;
   direct_dns: string;
+  dns_mode: "vpn" | "auto" | "direct";
+  tun_ipv6?: boolean;
+  health_check?: boolean;
   close_to_tray: boolean;
   singbox_path: string | null;
   tun_interface_name: string;
