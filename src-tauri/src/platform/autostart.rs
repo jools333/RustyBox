@@ -247,7 +247,7 @@ pub fn set_enabled(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> 
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), desktop))]
     {
         use tauri_plugin_autostart::ManagerExt;
         let autolaunch = app.autolaunch();
@@ -256,6 +256,12 @@ pub fn set_enabled(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> 
         } else {
             autolaunch.disable().map_err(|e| e.to_string())
         }
+    }
+
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, enabled);
+        Ok(())
     }
 }
 
@@ -267,10 +273,16 @@ pub fn is_enabled(app: &tauri::AppHandle) -> Result<bool, String> {
         Ok(windows::is_enabled())
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), desktop))]
     {
         use tauri_plugin_autostart::ManagerExt;
         app.autolaunch().is_enabled().map_err(|e| e.to_string())
+    }
+
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Ok(false)
     }
 }
 
