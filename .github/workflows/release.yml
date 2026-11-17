@@ -167,6 +167,15 @@ jobs:
           fi
           npx @tauri-apps/cli android build --apk --target aarch64
 
+      - name: Sign Android APK
+        run: |
+          APK_DIR="src-tauri/gen/android/app/build/outputs/apk/universal/release"
+          UNSIGNED_APK=$(ls "$APK_DIR"/*.apk | head -n 1)
+          SIGNED_APK="$APK_DIR/rustybox-android-arm64.apk"
+          keytool -genkeypair -v -keystore /tmp/release.keystore -alias rustybox -keyalg RSA -keysize 2048 -validity 10000 -storepass rustybox -keypass rustybox -dname "CN=RustyBox,O=RustyBox,C=US"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
+          "$APKSIGNER" sign --ks /tmp/release.keystore --ks-pass pass:rustybox --key-pass pass:rustybox --ks-key-alias rustybox --out "$SIGNED_APK" "$UNSIGNED_APK"
+
       - name: Upload APK to Release
         uses: softprops/action-gh-release@v2
         env:
@@ -174,5 +183,4 @@ jobs:
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
           files: |
-            src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
-            src-tauri/gen/android/app/build/outputs/apk/arm64/release/*.apk
+            src-tauri/gen/android/app/build/outputs/apk/universal/release/rustybox-android-arm64.apk
