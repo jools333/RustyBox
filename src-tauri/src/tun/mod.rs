@@ -164,7 +164,12 @@ impl TunManager {
             details.push("Android VpnService available.".to_string());
         }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "android")))]
+        #[cfg(not(any(
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "android"
+        )))]
         {
             has_driver = false;
             details.push("Operating system is not Windows, Linux, or macOS".to_string());
@@ -548,7 +553,12 @@ pub fn check_elevation() -> bool {
         true
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "android")))]
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "android"
+    )))]
     {
         false
     }
