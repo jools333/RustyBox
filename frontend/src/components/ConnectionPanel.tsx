@@ -106,6 +106,11 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               onChange={(e) => onSelectProfile(e.target.value)}
               className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
             >
+              {!status.active_profile?.id && (
+                <option value="" disabled>
+                  -- Выберите профиль --
+                </option>
+              )}
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name} ({p.protocol.type.toUpperCase()} - {p.server}:{p.port})

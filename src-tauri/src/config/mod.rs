@@ -98,7 +98,7 @@ impl Default for AppConfig {
 #[derive(Clone)]
 pub struct ConfigManager {
     config: Arc<RwLock<AppConfig>>,
-    path: PathBuf,
+    path: Arc<RwLock<PathBuf>>,
 }
 
 impl ConfigManager {
@@ -106,7 +106,17 @@ impl ConfigManager {
         let cfg = Self::load_or_default(&path);
         Self {
             config: Arc::new(RwLock::new(cfg)),
-            path,
+            path: Arc::new(RwLock::new(path)),
+        }
+    }
+
+    pub fn set_path(&self, new_path: PathBuf) {
+        let cfg = Self::load_or_default(&new_path);
+        if let Ok(mut p) = self.path.write() {
+            *p = new_path;
+        }
+        if let Ok(mut c) = self.config.write() {
+            *c = cfg;
         }
     }
 
@@ -128,10 +138,15 @@ impl ConfigManager {
 
     pub fn save_config(&self, new_config: AppConfig) -> Result<(), ConfigError> {
         let json = serde_json::to_string_pretty(&new_config)?;
-        if let Some(parent) = self.path.parent() {
+        let path = self
+            .path
+            .read()
+            .map(|p| p.clone())
+            .unwrap_or_else(|_| Self::default_path());
+        if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&self.path, json)?;
+        fs::write(&path, json)?;
         if let Ok(mut lock) = self.config.write() {
             *lock = new_config;
         }

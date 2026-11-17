@@ -350,9 +350,11 @@ impl ConnectionManager {
             self.disconnect().await?;
         }
 
-        let _ = self.config_manager.update(|c| {
-            c.active_profile_id = Some(new_profile_id.to_string());
-        });
+        self.config_manager
+            .update(|c| {
+                c.active_profile_id = Some(new_profile_id.to_string());
+            })
+            .map_err(|e| VpnError::Core(format!("Failed to save active profile: {}", e)))?;
 
         if is_connected {
             self.connect().await?;
