@@ -78,7 +78,7 @@ pub fn run() {
                 app_state.config.set_path(config_dir.join("config.json"));
                 let cfg = app_state.config.get_config();
                 app_state.profiles.set_profiles(cfg.profiles.clone());
-                app_state.routing.set_rules(cfg.routing_rules.clone());
+                app_state.routing.set_rules(cfg.rules.clone());
             }
 
             // Clean up any stale Wintun/TUN adapter left behind by a previous crash or sudden reboot
