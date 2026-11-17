@@ -96,10 +96,10 @@ fn setup_vpn<R: Runtime>(
     #[cfg(target_os = "android")]
     let handle = api.register_android_plugin("com.rustybox.vpn", "VpnPlugin")?;
     #[cfg(not(target_os = "android"))]
-    let handle = {
+    {
         let _ = api;
-        return Err("rustybox-vpn plugin is only supported on Android".into());
-    };
+        Err("rustybox-vpn plugin is only supported on Android".into())
+    }
     #[cfg(target_os = "android")]
     Ok(RustyBoxVpn { handle })
 }
