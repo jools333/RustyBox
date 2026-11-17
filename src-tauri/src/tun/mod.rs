@@ -158,10 +158,11 @@ impl TunManager {
         }
 
         #[cfg(target_os = "android")]
-    {
-        // Android uses VpnService (user-consented OS dialog), no root/elevation needed
-        true
-    }
+        {
+            // Android uses VpnService (user-consented OS dialog), no root/elevation needed
+            has_driver = true;
+            details.push("Android VpnService available.".to_string());
+        }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "android")))]
         {
