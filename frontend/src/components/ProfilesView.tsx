@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import { Plus, Trash2, Clipboard, Check, Server, FileText, Lock, Pencil, X } from "lucide-react";
-import { Profile, VlessConfig, ShadowsocksConfig, OpenvpnConfig } from "../types";
+import { Profile, VlessConfig, ShadowsocksConfig, OpenvpnConfig, SshConfig } from "../types";
 import { api } from "../api";
 
 interface ProfilesViewProps {
@@ -42,13 +42,18 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   const [name, setName] = useState("");
   const [server, setServer] = useState("");
   const [port, setPort] = useState(443);
-  const [protoType, setProtoType] = useState<"Vless" | "Shadowsocks">("Vless");
+  const [protoType, setProtoType] = useState<"Vless" | "Shadowsocks" | "Ssh">("Vless");
   const [uuid, setUuid] = useState("");
   const [vlessFlow, setVlessFlow] = useState("xtls-rprx-vision");
   const [realityKey, setRealityKey] = useState("");
   const [sni, setSni] = useState("");
   const [ssMethod, setSsMethod] = useState("chacha20-ietf-poly1305");
   const [ssPassword, setSsPassword] = useState("");
+  const [sshUser, setSshUser] = useState("root");
+  const [sshPassword, setSshPassword] = useState("");
+  const [sshPrivateKey, setSshPrivateKey] = useState("");
+  const [sshPrivateKeyPath, setSshPrivateKeyPath] = useState("");
+  const [sshPassphrase, setSshPassphrase] = useState("");
   const [customMtu, setCustomMtu] = useState<string>("");
 
   // Edit Profile state
@@ -78,6 +83,13 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   const [editOvpnProto, setEditOvpnProto] = useState("udp");
   const [editOvpnUsername, setEditOvpnUsername] = useState("");
   const [editOvpnPassword, setEditOvpnPassword] = useState("");
+
+  // SSH edit fields
+  const [editSshUser, setEditSshUser] = useState("root");
+  const [editSshPassword, setEditSshPassword] = useState("");
+  const [editSshPrivateKey, setEditSshPrivateKey] = useState("");
+  const [editSshPrivateKeyPath, setEditSshPrivateKeyPath] = useState("");
+  const [editSshPassphrase, setEditSshPassphrase] = useState("");
 
   const handleImport = async () => {
     try {
@@ -219,7 +231,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         protocol: { type: "Vless", ...vlessCfg },
         mtu: mtuVal,
       };
-    } else {
+    } else if (protoType === "Shadowsocks") {
       const ssCfg: ShadowsocksConfig = {
         method: ssMethod,
         password: ssPassword,
@@ -230,6 +242,22 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         server,
         port,
         protocol: { type: "Shadowsocks", ...ssCfg },
+        mtu: mtuVal,
+      };
+    } else {
+      const sshCfg: SshConfig = {
+        user: sshUser.trim() || "root",
+        password: sshPassword || undefined,
+        private_key: sshPrivateKey.trim() || undefined,
+        private_key_path: sshPrivateKeyPath.trim() || undefined,
+        private_key_passphrase: sshPassphrase || undefined,
+      };
+      profile = {
+        id: crypto.randomUUID(),
+        name,
+        server,
+        port,
+        protocol: { type: "Ssh", ...sshCfg },
         mtu: mtuVal,
       };
     }
@@ -266,6 +294,13 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
       setEditOvpnProto(cfg.proto || "udp");
       setEditOvpnUsername(cfg.username || "");
       setEditOvpnPassword(cfg.password || "");
+    } else if (p.protocol.type === "Ssh") {
+      const cfg = p.protocol as SshConfig;
+      setEditSshUser(cfg.user || "root");
+      setEditSshPassword(cfg.password || "");
+      setEditSshPrivateKey(cfg.private_key || "");
+      setEditSshPrivateKeyPath(cfg.private_key_path || "");
+      setEditSshPassphrase(cfg.private_key_passphrase || "");
     }
   };
 
@@ -327,7 +362,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         password: editSsPassword.trim(),
       };
       updatedProtocol = { type: "Shadowsocks", ...ssCfg };
-    } else {
+    } else if (editingProfile.protocol.type === "Openvpn") {
       const prevCfg = editingProfile.protocol as OpenvpnConfig;
       const ovpnCfg: OpenvpnConfig = {
         ...prevCfg,
@@ -336,6 +371,26 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         password: editOvpnPassword || undefined,
       };
       updatedProtocol = { type: "Openvpn", ...ovpnCfg };
+    } else {
+      const trimmedUser = editSshUser.trim();
+      if (!trimmedUser) {
+        setEditError("Имя пользователя SSH не может быть пустым");
+        return;
+      }
+      if (!editSshPassword && !editSshPrivateKey.trim() && !editSshPrivateKeyPath.trim()) {
+        setEditError("Укажите пароль или приватный ключ (или путь к ключу)");
+        return;
+      }
+      const prevCfg = editingProfile.protocol as SshConfig;
+      const sshCfg: SshConfig = {
+        ...prevCfg,
+        user: trimmedUser,
+        password: editSshPassword || undefined,
+        private_key: editSshPrivateKey.trim() || undefined,
+        private_key_path: editSshPrivateKeyPath.trim() || undefined,
+        private_key_passphrase: editSshPassphrase || undefined,
+      };
+      updatedProtocol = { type: "Ssh", ...sshCfg };
     }
 
     const updatedProfile: Profile = {
@@ -406,7 +461,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
             <Server className="w-8 h-8 mx-auto mb-2 opacity-50" />
             <p className="text-xs font-medium">No VPN profiles configured</p>
             <p className="text-[11px] text-slate-600 mt-1">
-              Import an .ovpn file or VLESS / Shadowsocks link to get started
+              Import an .ovpn file or VLESS / Shadowsocks / SSH link to get started
             </p>
           </div>
         ) : (
@@ -414,11 +469,18 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
             const isActive = p.id === activeProfileId;
             const isVless = p.protocol.type === "Vless";
             const isOpenvpn = p.protocol.type === "Openvpn";
+            const isSsh = p.protocol.type === "Ssh";
             const isReality = isVless && (p.protocol as VlessConfig).reality;
             const ovpnProto = isOpenvpn
               ? (p.protocol as OpenvpnConfig).proto?.toUpperCase()
               : "";
             const ovpnCipher = isOpenvpn ? (p.protocol as OpenvpnConfig).cipher : null;
+            const sshCfg = isSsh ? (p.protocol as SshConfig) : null;
+            const sshMissingCreds =
+              sshCfg !== null &&
+              !sshCfg.password &&
+              !sshCfg.private_key?.trim() &&
+              !sshCfg.private_key_path?.trim();
 
             return (
               <div
@@ -449,6 +511,10 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                       {isOpenvpn ? (
                         <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-amber-950 text-amber-400 border border-amber-800/50">
                           OPENVPN {ovpnProto}
+                        </span>
+                      ) : isSsh ? (
+                        <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-sky-950 text-sky-400 border border-sky-800/50">
+                          SSH
                         </span>
                       ) : (
                         <span className="px-1.5 py-0.2 text-[9px] font-mono rounded bg-slate-800 text-slate-400 border border-slate-700">
@@ -485,9 +551,14 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                           НЕТ CA СЕРТИФИКАТА
                         </span>
                       )}
+                      {sshMissingCreds && (
+                        <span className="px-1.5 py-0.2 text-[9px] font-semibold rounded bg-rose-950 text-rose-300 border border-rose-800/60" title="Укажите пароль или приватный ключ в настройках профиля">
+                          НЕТ ПАРОЛЯ / КЛЮЧА
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                      {p.server}:{p.port}
+                      {isSsh && sshCfg ? `${sshCfg.user}@${p.server}:${p.port}` : `${p.server}:${p.port}`}
                     </p>
                   </div>
                 </div>
@@ -623,7 +694,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-5 space-y-4 shadow-2xl">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Clipboard className="w-4 h-4 text-orange-400" />
-              Import VLESS / Shadowsocks URI
+              Import VLESS / Shadowsocks / SSH URI
             </h3>
 
             <div className="space-y-1.5">
@@ -640,7 +711,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                 rows={4}
                 value={uriInput}
                 onChange={(e) => setUriInput(e.target.value)}
-                placeholder="vless://... or ss://..."
+                placeholder="vless://... or ss://... or ssh://root@185.227.174.2"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 font-mono focus:outline-none focus:border-orange-500"
               />
             </div>
@@ -730,11 +801,20 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                 <label className="block text-slate-400 mb-1">Protocol</label>
                 <select
                   value={protoType}
-                  onChange={(e) => setProtoType(e.target.value as any)}
+                  onChange={(e) => {
+                    const next = e.target.value as "Vless" | "Shadowsocks" | "Ssh";
+                    setProtoType(next);
+                    if (next === "Ssh" && port === 443) {
+                      setPort(22);
+                    } else if (next !== "Ssh" && port === 22) {
+                      setPort(443);
+                    }
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
                 >
                   <option value="Vless">VLESS (with REALITY / TLS)</option>
                   <option value="Shadowsocks">Shadowsocks</option>
+                  <option value="Ssh">SSH Tunnel</option>
                 </select>
               </div>
 
@@ -807,7 +887,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                     />
                   </div>
                 </>
-              ) : (
+              ) : protoType === "Shadowsocks" ? (
                 <>
                   <div>
                     <label className="block text-slate-400 mb-1">Method / Cipher</label>
@@ -830,6 +910,59 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                       type="password"
                       value={ssPassword}
                       onChange={(e) => setSsPassword(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-slate-400 mb-1">Username</label>
+                    <input
+                      type="text"
+                      value={sshUser}
+                      onChange={(e) => setSshUser(e.target.value)}
+                      placeholder="root"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 mb-1">Password (optional if using key)</label>
+                    <input
+                      type="password"
+                      value={sshPassword}
+                      onChange={(e) => setSshPassword(e.target.value)}
+                      placeholder="SSH password"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 mb-1">Private Key Path (optional)</label>
+                    <input
+                      type="text"
+                      value={sshPrivateKeyPath}
+                      onChange={(e) => setSshPrivateKeyPath(e.target.value)}
+                      placeholder="C:\Users\user\.ssh\id_ed25519"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-[11px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 mb-1">Private Key Content (optional)</label>
+                    <textarea
+                      rows={3}
+                      value={sshPrivateKey}
+                      onChange={(e) => setSshPrivateKey(e.target.value)}
+                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-[11px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 mb-1">Key Passphrase (optional)</label>
+                    <input
+                      type="password"
+                      value={sshPassphrase}
+                      onChange={(e) => setSshPassphrase(e.target.value)}
+                      placeholder="Passphrase if key is encrypted"
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
                     />
                   </div>
@@ -1143,6 +1276,66 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                       value={editOvpnPassword}
                       onChange={(e) => setEditOvpnPassword(e.target.value)}
                       placeholder="Password"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* SSH settings */}
+              {editingProfile.protocol.type === "Ssh" && (
+                <>
+                  <div>
+                    <label className="block text-slate-400 mb-1">Имя пользователя (User)</label>
+                    <input
+                      type="text"
+                      value={editSshUser}
+                      onChange={(e) => setEditSshUser(e.target.value)}
+                      placeholder="root"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1">Пароль (если не используется ключ)</label>
+                    <input
+                      type="password"
+                      value={editSshPassword}
+                      onChange={(e) => setEditSshPassword(e.target.value)}
+                      placeholder="SSH пароль"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1">Путь к приватному ключу (опционально)</label>
+                    <input
+                      type="text"
+                      value={editSshPrivateKeyPath}
+                      onChange={(e) => setEditSshPrivateKeyPath(e.target.value)}
+                      placeholder="C:\Users\user\.ssh\id_ed25519"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1">Приватный ключ (текст, опционально)</label>
+                    <textarea
+                      rows={3}
+                      value={editSshPrivateKey}
+                      onChange={(e) => setEditSshPrivateKey(e.target.value)}
+                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1">Парольная фраза ключа (опционально)</label>
+                    <input
+                      type="password"
+                      value={editSshPassphrase}
+                      onChange={(e) => setEditSshPassphrase(e.target.value)}
+                      placeholder="Passphrase"
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-orange-500"
                     />
                   </div>

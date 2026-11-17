@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.23";
+export const APP_VERSION = "0.1.24";
 
 export type ConnectionState = "disconnected" | "starting" | "connected" | "stopping" | "error";
 
@@ -34,10 +34,21 @@ export interface OpenvpnConfig {
   raw_ovpn?: string;
 }
 
+export interface SshConfig {
+  user: string;
+  password?: string;
+  private_key?: string;
+  private_key_path?: string;
+  private_key_passphrase?: string;
+  host_key?: string[];
+  client_version?: string;
+}
+
 export type ProtocolConfig =
   | ({ type: "Vless" } & VlessConfig)
   | ({ type: "Shadowsocks" } & ShadowsocksConfig)
-  | ({ type: "Openvpn" } & OpenvpnConfig);
+  | ({ type: "Openvpn" } & OpenvpnConfig)
+  | ({ type: "Ssh" } & SshConfig);
 
 export interface Profile {
   id: string;

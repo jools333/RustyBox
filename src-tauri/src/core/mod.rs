@@ -680,6 +680,58 @@ impl CoreManager {
 
                 endpoints.push(ovpn_json);
             }
+            ProtocolConfig::Ssh(cfg) => {
+                let user = if cfg.user.trim().is_empty() {
+                    "root"
+                } else {
+                    cfg.user.trim()
+                };
+                let mut ssh_json = json!({
+                    "type": "ssh",
+                    "tag": tag,
+                    "server": profile.server,
+                    "server_port": profile.port,
+                    "user": user
+                });
+
+                if let Some(ref pwd) = cfg.password {
+                    if !pwd.is_empty() {
+                        ssh_json["password"] = json!(pwd);
+                    }
+                }
+                if let Some(ref pk) = cfg.private_key {
+                    if !pk.trim().is_empty() {
+                        ssh_json["private_key"] = json!(pk.trim());
+                    }
+                }
+                if let Some(ref pk_path) = cfg.private_key_path {
+                    if !pk_path.trim().is_empty() {
+                        ssh_json["private_key_path"] = json!(pk_path.trim());
+                    }
+                }
+                if let Some(ref passphrase) = cfg.private_key_passphrase {
+                    if !passphrase.is_empty() {
+                        ssh_json["private_key_passphrase"] = json!(passphrase);
+                    }
+                }
+                if let Some(ref host_keys) = cfg.host_key {
+                    let non_empty: Vec<&str> = host_keys
+                        .iter()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if !non_empty.is_empty() {
+                        ssh_json["host_key"] = json!(non_empty);
+                    }
+                }
+                if let Some(ref cv) = cfg.client_version {
+                    if !cv.trim().is_empty() {
+                        ssh_json["client_version"] = json!(cv.trim());
+                    }
+                }
+
+                outbounds.insert(0, ssh_json);
+            }
         }
     }
 
@@ -905,11 +957,14 @@ impl CoreManager {
             }
         }
 
-        let tun_inbound = self.tun_manager.generate_tun_inbound(
+        let mut tun_inbound = self.tun_manager.generate_tun_inbound(
             tun_interface_name,
             effective_mtu,
             &route_exclude_address,
         );
+        if matches!(profile.protocol, ProtocolConfig::Ssh(_)) {
+            tun_inbound["strict_route"] = json!(false);
+        }
 
         let remote_dns_val = if remote_dns.is_empty() {
             "1.1.1.1"
@@ -930,6 +985,13 @@ impl CoreManager {
             "path": [hosts_path.to_string_lossy()]
         });
 
+        // SSH outbound only supports TCP (direct-tcpip); UDP DNS queries through it would fail.
+        let remote_dns_type = if matches!(profile.protocol, ProtocolConfig::Ssh(_)) {
+            "tcp"
+        } else {
+            "udp"
+        };
+
         let mut final_config = json!({
             "log": {
                 "level": log_level,
@@ -939,7 +1001,7 @@ impl CoreManager {
                 "servers": [
                     {
                         "tag": "dns-remote",
-                        "type": "udp",
+                        "type": remote_dns_type,
                         "server": remote_dns_val,
                         "detour": "proxy"
                     },
@@ -1729,6 +1791,66 @@ mod tests {
             assert!(
                 val_res.is_ok(),
                 "Dual-VPN validation failed: {:?}",
+                val_res.err()
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_ssh_singbox_config() {
+        let log_mgr = LogManager::new(100);
+        let core_mgr = CoreManager::new(log_mgr);
+        let profile = Profile::new_ssh(
+            "Home SSH".to_string(),
+            "185.227.174.2".to_string(),
+            22,
+            crate::profiles::SshConfig {
+                user: "root".to_string(),
+                password: Some("test-ssh-password".to_string()),
+                private_key: None,
+                private_key_path: None,
+                private_key_passphrase: None,
+                host_key: None,
+                client_version: None,
+            },
+        );
+
+        let cfg = core_mgr.generate_singbox_config(
+            &profile,
+            None,
+            RoutingMode::GlobalVpn,
+            RuleAction::Vpn,
+            &[],
+            "1.1.1.1",
+            "77.88.8.8",
+            "rustybox-tun",
+            9000,
+            "info",
+        );
+
+        // Primary outbound must be ssh
+        let outbounds = cfg["outbounds"].as_array().expect("outbounds");
+        let ssh_out = outbounds
+            .iter()
+            .find(|o| o["tag"] == "proxy")
+            .expect("proxy outbound");
+        assert_eq!(ssh_out["type"], "ssh");
+        assert_eq!(ssh_out["server"], "185.227.174.2");
+        assert_eq!(ssh_out["server_port"], 22);
+        assert_eq!(ssh_out["user"], "root");
+        assert_eq!(ssh_out["password"], "test-ssh-password");
+
+        // Remote DNS must use TCP over SSH (UDP not supported by SSH direct-tcpip)
+        assert_eq!(cfg["dns"]["servers"][0]["tag"], "dns-remote");
+        assert_eq!(cfg["dns"]["servers"][0]["type"], "tcp");
+        assert_eq!(cfg["inbounds"][0]["strict_route"], false);
+
+        // Validate against actual sing-box binary if present
+        if core_mgr.find_binary().is_some() {
+            let val_res = core_mgr.validate_config(&cfg);
+            assert!(
+                val_res.is_ok(),
+                "SSH sing-box validation failed: {:?}",
                 val_res.err()
             );
         }

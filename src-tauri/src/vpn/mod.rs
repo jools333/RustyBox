@@ -183,6 +183,32 @@ impl ConnectionManager {
                 return Err(VpnError::Core(err_msg));
             }
         }
+        // Validate SSH authentication readiness
+        if let ProtocolConfig::Ssh(ref ssh) = profile.protocol {
+            let has_pwd = ssh
+                .password
+                .as_deref()
+                .map(|p| !p.is_empty())
+                .unwrap_or(false);
+            let has_key = ssh
+                .private_key
+                .as_deref()
+                .map(|k| !k.trim().is_empty())
+                .unwrap_or(false);
+            let has_key_path = ssh
+                .private_key_path
+                .as_deref()
+                .map(|p| !p.trim().is_empty())
+                .unwrap_or(false);
+            if !has_pwd && !has_key && !has_key_path {
+                let err_msg = format!(
+                    "SSH profile '{}' requires a password or private key. Edit the profile to add credentials.",
+                    profile.name
+                );
+                self.set_error(&err_msg);
+                return Err(VpnError::Core(err_msg));
+            }
+        }
         if let Some(ref work) = work_profile {
             if let ProtocolConfig::Openvpn(ref ovpn) = work.protocol {
                 if ovpn.ca_cert.is_none() && ovpn.tls_auth.is_none() && ovpn.tls_crypt.is_none() {

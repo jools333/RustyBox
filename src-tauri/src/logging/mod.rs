@@ -167,6 +167,13 @@ pub fn mask_secrets(input: &str) -> String {
             .to_string();
     }
 
+    // Mask JSON private_key_passphrase fields: "private_key_passphrase": "..."
+    if let Ok(re_passphrase) = Regex::new(r#"(?i)("private_key_passphrase"\s*:\s*")[^"]+(")"#) {
+        out = re_passphrase
+            .replace_all(&out, "${1}******${2}")
+            .to_string();
+    }
+
     // Mask URI reality pbk parameter: pbk=...
     if let Ok(re_pbk) = Regex::new(r#"(?i)(pbk=)[^& \n\r\t]+"#) {
         out = re_pbk.replace_all(&out, "${1}[MASKED-KEY]").to_string();
@@ -177,6 +184,11 @@ pub fn mask_secrets(input: &str) -> String {
         out = re_ss
             .replace_all(&out, "ss://[MASKED-CREDENTIALS]@")
             .to_string();
+    }
+
+    // Mask SSH URI password: ssh://user:password@...
+    if let Ok(re_ssh) = Regex::new(r#"(?i)ssh://([^:@\s\r\n]+):([^@\s\r\n]+)@"#) {
+        out = re_ssh.replace_all(&out, "ssh://${1}:******@").to_string();
     }
 
     // Mask PEM private keys (e.g. OpenVPN client_key)
@@ -241,5 +253,18 @@ mod tests {
         let masked = mask_secrets(text);
         assert!(!masked.contains("MIIEowIBAAKCAQEA"));
         assert!(masked.contains("[MASKED-PRIVATE-KEY]"));
+    }
+
+    #[test]
+    fn test_mask_ssh_uri_and_passphrase() {
+        let uri = "Connecting to ssh://root:MySuperSecretPwd@185.227.174.2:22#Home";
+        let masked_uri = mask_secrets(uri);
+        assert!(!masked_uri.contains("MySuperSecretPwd"));
+        assert!(masked_uri.contains("ssh://root:******@185.227.174.2:22#Home"));
+
+        let json = r#"{"type": "ssh", "private_key_passphrase": "KeyPass123"}"#;
+        let masked_json = mask_secrets(json);
+        assert!(!masked_json.contains("KeyPass123"));
+        assert!(masked_json.contains("******"));
     }
 }

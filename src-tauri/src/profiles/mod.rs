@@ -68,11 +68,29 @@ pub struct ShadowsocksConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SshConfig {
+    pub user: String,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub private_key: Option<String>,
+    #[serde(default)]
+    pub private_key_path: Option<String>,
+    #[serde(default)]
+    pub private_key_passphrase: Option<String>,
+    #[serde(default)]
+    pub host_key: Option<Vec<String>>,
+    #[serde(default)]
+    pub client_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum ProtocolConfig {
     Vless(VlessConfig),
     Shadowsocks(ShadowsocksConfig),
     Openvpn(OpenvpnConfig),
+    Ssh(SshConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -134,6 +152,19 @@ impl Profile {
         }
     }
 
+    pub fn new_ssh(name: String, server: String, port: u16, config: SshConfig) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            server,
+            port,
+            protocol: ProtocolConfig::Ssh(config),
+            latency_ms: None,
+            only_network_resources: false,
+            mtu: None,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ProfileError> {
         if self.server.trim().is_empty() {
             return Err(ProfileError::InvalidHostOrPort(
@@ -181,6 +212,33 @@ impl Profile {
                     ));
                 }
             }
+            ProtocolConfig::Ssh(cfg) => {
+                if cfg.user.trim().is_empty() {
+                    return Err(ProfileError::MissingParameter(
+                        "SSH username cannot be empty".to_string(),
+                    ));
+                }
+                let has_password = cfg
+                    .password
+                    .as_deref()
+                    .map(|p| !p.is_empty())
+                    .unwrap_or(false);
+                let has_key = cfg
+                    .private_key
+                    .as_deref()
+                    .map(|k| !k.trim().is_empty())
+                    .unwrap_or(false);
+                let has_key_path = cfg
+                    .private_key_path
+                    .as_deref()
+                    .map(|p| !p.trim().is_empty())
+                    .unwrap_or(false);
+                if !has_password && !has_key && !has_key_path {
+                    return Err(ProfileError::MissingParameter(
+                        "SSH requires a password, private key, or private key path".to_string(),
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -196,6 +254,8 @@ pub fn parse_profile_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         parse_vless_uri(trimmed)
     } else if trimmed.starts_with("ss://") {
         parse_shadowsocks_uri(trimmed)
+    } else if trimmed.starts_with("ssh://") {
+        parse_ssh_uri(trimmed)
     } else {
         let scheme = trimmed.split("://").next().unwrap_or("unknown");
         Err(ProfileError::UnsupportedScheme(scheme.to_string()))
@@ -465,6 +525,95 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         server: server.to_string(),
         port,
         protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
+        latency_ms: None,
+        only_network_resources: false,
+        mtu,
+    })
+}
+
+fn parse_ssh_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
+    let url = Url::parse(raw_uri).map_err(|e| ProfileError::InvalidUri(e.to_string()))?;
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| ProfileError::InvalidHostOrPort("Missing SSH server host".to_string()))?
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_string();
+    if host.is_empty() {
+        return Err(ProfileError::InvalidHostOrPort(
+            "Empty SSH server host".to_string(),
+        ));
+    }
+
+    let port = url.port().unwrap_or(22);
+
+    let raw_user = url.username();
+    let user = if raw_user.is_empty() {
+        "root".to_string()
+    } else {
+        percent_decode_str(raw_user)
+            .decode_utf8()
+            .map_err(|e| ProfileError::InvalidUri(e.to_string()))?
+            .to_string()
+    };
+
+    let password = match url.password() {
+        Some(pwd) if !pwd.is_empty() => Some(
+            percent_decode_str(pwd)
+                .decode_utf8()
+                .map_err(|e| ProfileError::InvalidUri(e.to_string()))?
+                .to_string(),
+        ),
+        _ => None,
+    };
+
+    let name = match url.fragment() {
+        Some(frag) if !frag.trim().is_empty() => percent_decode_str(frag.trim())
+            .decode_utf8()
+            .map_err(|e| ProfileError::InvalidUri(e.to_string()))?
+            .to_string(),
+        _ => format!("{}@{}", user, host),
+    };
+
+    let mut private_key_path = None;
+    let mut private_key_passphrase = None;
+    let mut client_version = None;
+    let mut mtu = None;
+
+    for (k, v) in url.query_pairs() {
+        let val = v.trim().to_string();
+        if val.is_empty() {
+            continue;
+        }
+        match k.as_ref() {
+            "private_key_path" | "key" | "identity" => private_key_path = Some(val),
+            "private_key_passphrase" | "passphrase" => private_key_passphrase = Some(val),
+            "client_version" => client_version = Some(val),
+            "mtu" => {
+                if let Ok(m) = val.parse::<u32>() {
+                    if m > 0 {
+                        mtu = Some(m);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Profile {
+        id: Uuid::new_v4().to_string(),
+        name,
+        server: host,
+        port,
+        protocol: ProtocolConfig::Ssh(SshConfig {
+            user,
+            password,
+            private_key: None,
+            private_key_path,
+            private_key_passphrase,
+            host_key: None,
+            client_version,
+        }),
         latency_ms: None,
         only_network_resources: false,
         mtu,
@@ -964,6 +1113,29 @@ impl ProfileManager {
                 .as_ref()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
+        } else if let ProtocolConfig::Ssh(ref mut cfg) = profile.protocol {
+            cfg.user = cfg.user.trim().to_string();
+            cfg.password = cfg.password.as_ref().filter(|p| !p.is_empty()).cloned();
+            cfg.private_key = cfg
+                .private_key
+                .as_ref()
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty());
+            cfg.private_key_path = cfg
+                .private_key_path
+                .as_ref()
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty());
+            cfg.private_key_passphrase = cfg
+                .private_key_passphrase
+                .as_ref()
+                .filter(|p| !p.is_empty())
+                .cloned();
+            cfg.client_version = cfg
+                .client_version
+                .as_ref()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
         }
         profile.validate()?;
 
@@ -1359,5 +1531,73 @@ verify-x509-name "my-vpn-server" name
         let ovpn = "client\ndev tun\nremote 1.2.3.4 1194\ntun-mtu 1420\n";
         let ovpn_prof = parse_ovpn(ovpn, None, None).unwrap();
         assert_eq!(ovpn_prof.mtu, Some(1420));
+    }
+
+    #[test]
+    fn test_parse_ssh_uri_basic_and_full() {
+        let basic =
+            parse_profile_uri("ssh://root@185.227.174.2").expect("Should parse basic SSH URI");
+        assert_eq!(basic.server, "185.227.174.2");
+        assert_eq!(basic.port, 22);
+        assert_eq!(basic.name, "root@185.227.174.2");
+        match basic.protocol {
+            ProtocolConfig::Ssh(cfg) => {
+                assert_eq!(cfg.user, "root");
+                assert_eq!(cfg.password, None);
+            }
+            _ => panic!("Expected SSH protocol"),
+        }
+
+        let full = parse_profile_uri("ssh://admin:p%40ssword@185.227.174.2:2222?mtu=1380#MySSH")
+            .expect("Should parse full SSH URI");
+        assert_eq!(full.server, "185.227.174.2");
+        assert_eq!(full.port, 2222);
+        assert_eq!(full.name, "MySSH");
+        assert_eq!(full.mtu, Some(1380));
+        match full.protocol {
+            ProtocolConfig::Ssh(cfg) => {
+                assert_eq!(cfg.user, "admin");
+                assert_eq!(cfg.password.as_deref(), Some("p@ssword"));
+            }
+            _ => panic!("Expected SSH protocol"),
+        }
+    }
+
+    #[test]
+    fn test_ssh_profile_validation() {
+        let missing_auth = Profile::new_ssh(
+            "Test SSH".to_string(),
+            "185.227.174.2".to_string(),
+            22,
+            SshConfig {
+                user: "root".to_string(),
+                password: None,
+                private_key: None,
+                private_key_path: None,
+                private_key_passphrase: None,
+                host_key: None,
+                client_version: None,
+            },
+        );
+        assert!(matches!(
+            missing_auth.validate(),
+            Err(ProfileError::MissingParameter(_))
+        ));
+
+        let with_pwd = Profile::new_ssh(
+            "Test SSH".to_string(),
+            "185.227.174.2".to_string(),
+            22,
+            SshConfig {
+                user: "root".to_string(),
+                password: Some("secret".to_string()),
+                private_key: None,
+                private_key_path: None,
+                private_key_passphrase: None,
+                host_key: None,
+                client_version: None,
+            },
+        );
+        assert!(with_pwd.validate().is_ok());
     }
 }
