@@ -168,6 +168,9 @@ jobs:
       - name: Build libbox.aar for Android
         run: |
           mkdir -p src-tauri/plugins/rustybox-vpn/android/libs
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.4
+          gomobile init
           git clone --depth 1 --branch v1.11.4 https://github.com/SagerNet/sing-box.git /tmp/sing-box
           cd /tmp/sing-box
           go run ./cmd/internal/build_libbox -target android -platform android/arm64
