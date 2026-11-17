@@ -1,6 +1,6 @@
 [package]
 name = "rustybox"
-version = "0.1.24"
+version = "0.1.25"
 description = "Lightweight cross-platform VPN client powered by sing-box"
 authors = ["RustyBox Contributors"]
 edition = "2021"
@@ -22,6 +22,9 @@ gui = [
 ]
 
 [dependencies]
+tauri = { version = "2", features = ["image-png", "image-ico"], optional = true }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"], optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-process = { version = "2", optional = true }

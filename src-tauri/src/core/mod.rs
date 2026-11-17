@@ -964,6 +964,9 @@ impl CoreManager {
         );
         if matches!(profile.protocol, ProtocolConfig::Ssh(_)) {
             tun_inbound["strict_route"] = json!(false);
+            // Many SSH servers lack IPv6 connectivity; advertising an IPv6 TUN address
+            // causes browsers to attempt IPv6 connections that sshd immediately rejects.
+            tun_inbound["address"] = json!(["172.19.0.1/30"]);
         }
 
         let remote_dns_val = if remote_dns.is_empty() {
@@ -1024,6 +1027,10 @@ impl CoreManager {
                 "final": final_outbound
             }
         });
+
+        if matches!(profile.protocol, ProtocolConfig::Ssh(_)) {
+            final_config["dns"]["strategy"] = json!("ipv4_only");
+        }
 
         if !endpoints.is_empty() {
             final_config["endpoints"] = json!(endpoints);
