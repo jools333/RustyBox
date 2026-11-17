@@ -116,7 +116,7 @@ class RustyBoxVpnService : VpnService() {
                 override fun closeDefaultInterfaceMonitor(listener: io.nekohasekai.libbox.InterfaceUpdateListener?) {}
                 override fun getInterfaces(): io.nekohasekai.libbox.NetworkInterfaceIterator? = null
                 override fun sendNotification(notification: io.nekohasekai.libbox.Notification?) {}
-                override fun systemCertificates(): io.nekohasekai.libbox.StringIterator? = null
+                override fun writeLog(message: String?) {}
             }
 
             val service = Libbox.newService(configJson, platform)
