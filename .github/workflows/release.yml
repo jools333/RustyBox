@@ -160,6 +160,12 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
+      - name: Download libbox.aar for Android
+        run: |
+          mkdir -p src-tauri/plugins/rustybox-vpn/android/libs
+          curl -fL "https://github.com/SagerNet/sing-box/releases/download/v1.11.4/libbox-1.11.4.aar" -o src-tauri/plugins/rustybox-vpn/android/libs/libbox.aar || \
+          curl -fL "https://github.com/SagerNet/sing-box/releases/latest/download/libbox.aar" -o src-tauri/plugins/rustybox-vpn/android/libs/libbox.aar
+
       - name: Initialize & Build Android APK
         run: |
           if [ ! -d "src-tauri/gen/android" ]; then

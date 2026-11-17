@@ -43,6 +43,11 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default();
 
+    #[cfg(target_os = "android")]
+    {
+        builder = builder.plugin(tauri_plugin_rustybox_vpn::init());
+    }
+
     #[cfg(desktop)]
     {
         builder = builder
