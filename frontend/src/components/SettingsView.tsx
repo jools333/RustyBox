@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   Save,
   CheckCircle2,
@@ -46,6 +47,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     api.isAutostartEnabled()
       .then((enabled) => setAutoStart(enabled))
       .catch((err) => console.warn("Failed to check autostart:", err));
+  }, []);
+
+  const [appVersion, setAppVersion] = useState<string>(APP_VERSION);
+
+  useEffect(() => {
+    getVersion()
+      .then((v) => {
+        if (v) setAppVersion(v);
+      })
+      .catch(() => {});
   }, []);
 
   // Updater states
@@ -240,7 +251,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             Software Updates
           </h3>
           <span className="text-[10px] text-slate-400 font-mono">
-            App Version: v{APP_VERSION}
+            App Version: v{appVersion}
           </span>
         </div>
 
@@ -269,7 +280,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex items-center justify-between pt-1">
             <div className="flex items-center gap-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>You have the latest version (v{APP_VERSION})</span>
+              <span>You have the latest version (v{appVersion})</span>
             </div>
             <button
               onClick={handleCheckUpdates}
