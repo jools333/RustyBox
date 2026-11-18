@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { check, Update, DownloadEvent } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -323,8 +324,43 @@ export const api = {
     return invoke<TunPrerequisites>("check_tun_prerequisites");
   },
 
-  checkForUpdates: async (): Promise<Update | null> => {
+  checkForUpdates: async (): Promise<(Update & { apkUrl?: string }) | null> => {
     if (!isTauri()) return null;
+
+    if (typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent)) {
+      const currentVersion = await getVersion().catch(() => "0.0.0");
+      const res = await fetch(
+        "https://api.github.com/repos/jools333/RustyBox/releases/latest",
+        { headers: { Accept: "application/vnd.github+json" } }
+      );
+      if (!res.ok) {
+        throw new Error(`GitHub API error: ${res.status}`);
+      }
+      const release = await res.json();
+      const latestVersion = String(release.tag_name || "").replace(/^v/i, "");
+      if (!latestVersion) return null;
+
+      const parseVer = (v: string) => v.split(".").map((n) => parseInt(n, 10) || 0);
+      const a = parseVer(latestVersion);
+      const b = parseVer(currentVersion.replace(/^v/i, ""));
+      const isNewer =
+        a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : (a[2] || 0) > (b[2] || 0);
+
+      if (!isNewer) return null;
+
+      const apkAsset = Array.isArray(release.assets)
+        ? release.assets.find((asset: any) => String(asset?.name || "").endsWith(".apk"))
+        : null;
+
+      return {
+        version: latestVersion,
+        currentVersion,
+        date: release.published_at || "",
+        body: release.body || "",
+        apkUrl: apkAsset?.browser_download_url || release.html_url,
+      } as unknown as Update & { apkUrl?: string };
+    }
+
     return check();
   },
 

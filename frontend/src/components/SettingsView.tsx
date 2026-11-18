@@ -87,6 +87,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleInstallUpdate = async () => {
     if (!currentUpdate) return;
+    const apkUrl = (currentUpdate as Update & { apkUrl?: string }).apkUrl;
+    if (apkUrl) {
+      window.open(apkUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     setUpdateStatus("downloading");
     setDownloadProgress(0);
     setUpdateError(null);
