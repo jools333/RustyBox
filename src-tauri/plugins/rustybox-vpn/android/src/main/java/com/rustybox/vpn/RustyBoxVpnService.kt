@@ -17,7 +17,6 @@ import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.LocalDNSTransport
 import io.nekohasekai.libbox.NeighborUpdateListener
 import io.nekohasekai.libbox.NetworkInterfaceIterator
-import io.nekohasekai.libbox.Notification
 import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.PlatformInterface
 import io.nekohasekai.libbox.PlatformUser
@@ -139,7 +138,7 @@ class RustyBoxVpnService : VpnService() {
                 override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
                 override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
                 override fun getInterfaces(): NetworkInterfaceIterator? = null
-                override fun sendNotification(notification: Notification?) {}
+                override fun sendNotification(notification: io.nekohasekai.libbox.Notification?) {}
                 override fun cancelNotification(identifier: String?, typeID: Int) {}
                 override fun startNeighborMonitor(listener: NeighborUpdateListener?) {}
                 override fun closeNeighborMonitor(listener: NeighborUpdateListener?) {}
