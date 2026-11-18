@@ -118,7 +118,9 @@ class RustyBoxVpnService : VpnService() {
                         .setSession("RustyBox")
                         .setMtu(mtu)
                         .addAddress("172.19.0.1", 30)
+                        .addAddress("fdfe:dcba:9876::1", 126)
                         .addRoute("0.0.0.0", 0)
+                        .addRoute("::", 0)
                         .addDnsServer("1.1.1.1")
                         .addDisallowedApplication(packageName)
 
@@ -129,7 +131,10 @@ class RustyBoxVpnService : VpnService() {
                 }
 
                 override fun autoDetectInterfaceControl(fd: Int) {
-                    protect(fd)
+                    val ok = protect(fd)
+                    if (!ok) {
+                        android.util.Log.e("RustyBoxVPN", "protect($fd) returned false!")
+                    }
                 }
 
                 override fun usePlatformAutoDetectInterfaceControl(): Boolean = true

@@ -146,6 +146,24 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun readClipboard(invoke: Invoke) {
+        try {
+            val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = clipboard.primaryClip
+            val text = if (clip != null && clip.itemCount > 0) {
+                clip.getItemAt(0).coerceToText(activity)?.toString() ?: ""
+            } else {
+                ""
+            }
+            val ret = JSObject()
+            ret.put("text", text)
+            invoke.resolve(ret)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "Failed to read clipboard")
+        }
+    }
+
+    @Command
     fun openUrl(invoke: Invoke) {
         val args = invoke.parseArgs(OpenUrlArgs::class.java)
         val url = args.url

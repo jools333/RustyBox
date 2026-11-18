@@ -1,4 +1,5 @@
 import React, { useState, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Plus, Trash2, Clipboard, Check, Server, FileText, Lock, Pencil, X } from "lucide-react";
 import { Profile, VlessConfig, ShadowsocksConfig, OpenvpnConfig, SshConfig } from "../types";
 import { api } from "../api";
@@ -202,7 +203,13 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
 
   const handlePasteClipboard = async () => {
     try {
-      const text = await navigator.clipboard.readText();
+      let text = "";
+      try {
+        const res = await invoke<{ text: string }>("plugin:rustybox-vpn|readClipboard");
+        text = res?.text || "";
+      } catch {
+        text = await navigator.clipboard.readText();
+      }
       if (text) {
         setUriInput(text);
       }
