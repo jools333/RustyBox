@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Save,
   CheckCircle2,
@@ -100,7 +101,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (!currentUpdate) return;
     const apkUrl = (currentUpdate as Update & { apkUrl?: string }).apkUrl;
     if (apkUrl) {
-      window.open(apkUrl, "_blank", "noopener,noreferrer");
+      try {
+        await invoke("plugin:rustybox-vpn|openUrl", { url: apkUrl });
+      } catch {
+        window.open(apkUrl, "_blank", "noopener,noreferrer");
+      }
       return;
     }
     setUpdateStatus("downloading");

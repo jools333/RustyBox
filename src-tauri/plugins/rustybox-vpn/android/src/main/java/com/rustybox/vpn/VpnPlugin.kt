@@ -27,6 +27,11 @@ class StartVpnArgs {
     lateinit var config: String
 }
 
+@InvokeArg
+class OpenUrlArgs {
+    var url: String? = null
+}
+
 @TauriPlugin
 class VpnPlugin(private val activity: Activity) : Plugin(activity) {
     private var pendingConfig: String? = null
@@ -138,6 +143,25 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
             .putString("master_key_iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .apply()
         return masterKey
+    }
+
+    @Command
+    fun openUrl(invoke: Invoke) {
+        val args = invoke.parseArgs(OpenUrlArgs::class.java)
+        val url = args.url
+        if (url.isNullOrBlank()) {
+            invoke.reject("URL must not be empty")
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(intent)
+            invoke.resolve()
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "Failed to open URL")
+        }
     }
 
     private fun launchVpnService(config: String) {
