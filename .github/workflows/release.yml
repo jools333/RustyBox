@@ -145,8 +145,9 @@ jobs:
         run: |
           echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> $GITHUB_ENV
           yes | ${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          ${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125"
-          echo "NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/26.1.10909125" >> $GITHUB_ENV
+          ${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager "ndk;28.0.13004108"
+          echo "NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/28.0.13004108" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/28.0.13004108" >> $GITHUB_ENV
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
