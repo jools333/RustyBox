@@ -5,6 +5,7 @@ pub mod logging;
 pub mod platform;
 pub mod profiles;
 pub mod routing;
+pub mod secrets;
 pub mod tun;
 pub mod vpn;
 
@@ -78,6 +79,7 @@ pub fn run() {
                 if let Ok(config_dir) = app.path().app_config_dir() {
                     let _ = std::fs::create_dir_all(&config_dir);
                     app_state.config.set_path(config_dir.join("config.json"));
+                    app_state.config.init_android_vault(app.handle());
                     let cfg = app_state.config.get_config();
                     app_state.profiles.set_profiles(cfg.profiles.clone());
                     app_state.routing.set_rules(cfg.rules.clone());

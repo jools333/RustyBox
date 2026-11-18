@@ -46,6 +46,10 @@ pub struct OpenvpnConfig {
     pub auth: Option<String>,
     #[serde(default)]
     pub server_name: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_password: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_client_key: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -65,6 +69,8 @@ pub struct VlessConfig {
 pub struct ShadowsocksConfig {
     pub method: String,
     pub password: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_password: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -82,6 +88,12 @@ pub struct SshConfig {
     pub host_key: Option<Vec<String>>,
     #[serde(default)]
     pub client_version: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_password: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_private_key: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_passphrase: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -162,6 +174,122 @@ impl Profile {
             latency_ms: None,
             only_network_resources: false,
             mtu: None,
+        }
+    }
+
+    /// Returns a copy of the profile with secret fields stripped for safe IPC/UI display.
+    /// Boolean `has_*` flags indicate whether each secret is currently stored.
+    pub fn redacted_for_ui(&self) -> Self {
+        let mut copy = self.clone();
+        match &mut copy.protocol {
+            ProtocolConfig::Ssh(cfg) => {
+                cfg.has_password = cfg
+                    .password
+                    .as_deref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                cfg.has_private_key = cfg
+                    .private_key
+                    .as_deref()
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+                cfg.has_passphrase = cfg
+                    .private_key_passphrase
+                    .as_deref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                cfg.password = None;
+                cfg.private_key = None;
+                cfg.private_key_passphrase = None;
+            }
+            ProtocolConfig::Shadowsocks(cfg) => {
+                cfg.has_password = !cfg.password.is_empty();
+                cfg.password.clear();
+            }
+            ProtocolConfig::Openvpn(cfg) => {
+                cfg.has_password = cfg
+                    .password
+                    .as_deref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                cfg.has_client_key = cfg
+                    .client_key
+                    .as_deref()
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+                cfg.password = None;
+                cfg.client_key = None;
+            }
+            ProtocolConfig::Vless(_) => {}
+        }
+        copy
+    }
+
+    /// Restores any unchanged secrets from `existing` when a profile comes back from the UI
+    /// with `has_* = true` and empty/None secret fields. Clears `has_*` flags afterwards.
+    pub fn merge_redacted_secrets(&mut self, existing: &Profile) {
+        match (&mut self.protocol, &existing.protocol) {
+            (ProtocolConfig::Ssh(new_cfg), ProtocolConfig::Ssh(old_cfg)) => {
+                if new_cfg
+                    .password
+                    .as_deref()
+                    .map(|s| s.is_empty())
+                    .unwrap_or(true)
+                    && new_cfg.has_password
+                {
+                    new_cfg.password = old_cfg.password.clone();
+                }
+                if new_cfg
+                    .private_key
+                    .as_deref()
+                    .map(|s| s.trim().is_empty())
+                    .unwrap_or(true)
+                    && new_cfg.has_private_key
+                {
+                    new_cfg.private_key = old_cfg.private_key.clone();
+                }
+                if new_cfg
+                    .private_key_passphrase
+                    .as_deref()
+                    .map(|s| s.is_empty())
+                    .unwrap_or(true)
+                    && new_cfg.has_passphrase
+                {
+                    new_cfg.private_key_passphrase = old_cfg.private_key_passphrase.clone();
+                }
+                new_cfg.has_password = false;
+                new_cfg.has_private_key = false;
+                new_cfg.has_passphrase = false;
+            }
+            (ProtocolConfig::Shadowsocks(new_cfg), ProtocolConfig::Shadowsocks(old_cfg)) => {
+                if new_cfg.password.is_empty() && new_cfg.has_password {
+                    new_cfg.password = old_cfg.password.clone();
+                }
+                new_cfg.has_password = false;
+            }
+            (ProtocolConfig::Openvpn(new_cfg), ProtocolConfig::Openvpn(old_cfg)) => {
+                if new_cfg
+                    .password
+                    .as_deref()
+                    .map(|s| s.is_empty())
+                    .unwrap_or(true)
+                    && new_cfg.has_password
+                {
+                    new_cfg.password = old_cfg.password.clone();
+                }
+                if new_cfg
+                    .client_key
+                    .as_deref()
+                    .map(|s| s.trim().is_empty())
+                    .unwrap_or(true)
+                    && new_cfg.has_client_key
+                {
+                    new_cfg.client_key = old_cfg.client_key.clone();
+                }
+                new_cfg.has_password = false;
+                new_cfg.has_client_key = false;
+            }
+            _ => {}
         }
     }
 
@@ -477,7 +605,11 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
             name,
             server: server.to_string(),
             port,
-            protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
+            protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig {
+                method,
+                password,
+                has_password: false,
+            }),
             latency_ms: None,
             only_network_resources: false,
             mtu,
@@ -524,7 +656,11 @@ fn parse_shadowsocks_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
         name,
         server: server.to_string(),
         port,
-        protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig { method, password }),
+        protocol: ProtocolConfig::Shadowsocks(ShadowsocksConfig {
+            method,
+            password,
+            has_password: false,
+        }),
         latency_ms: None,
         only_network_resources: false,
         mtu,
@@ -613,6 +749,9 @@ fn parse_ssh_uri(raw_uri: &str) -> Result<Profile, ProfileError> {
             private_key_passphrase,
             host_key: None,
             client_version,
+            has_password: false,
+            has_private_key: false,
+            has_passphrase: false,
         }),
         latency_ms: None,
         only_network_resources: false,
@@ -961,6 +1100,8 @@ pub fn parse_ovpn(
         raw_ovpn: Some(content.to_string()),
         auth,
         server_name,
+        has_password: false,
+        has_client_key: false,
     };
 
     Ok(Profile {
@@ -1577,6 +1718,9 @@ verify-x509-name "my-vpn-server" name
                 private_key_passphrase: None,
                 host_key: None,
                 client_version: None,
+                has_password: false,
+                has_private_key: false,
+                has_passphrase: false,
             },
         );
         assert!(matches!(
@@ -1596,6 +1740,9 @@ verify-x509-name "my-vpn-server" name
                 private_key_passphrase: None,
                 host_key: None,
                 client_version: None,
+                has_password: false,
+                has_private_key: false,
+                has_passphrase: false,
             },
         );
         assert!(with_pwd.validate().is_ok());

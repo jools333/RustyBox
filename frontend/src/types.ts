@@ -17,6 +17,7 @@ export interface VlessConfig {
 export interface ShadowsocksConfig {
   method: string;
   password: string;
+  has_password?: boolean;
 }
 
 export interface OpenvpnConfig {
@@ -32,6 +33,8 @@ export interface OpenvpnConfig {
   tls_crypt?: string;
   auth_user_pass_required: boolean;
   raw_ovpn?: string;
+  has_password?: boolean;
+  has_client_key?: boolean;
 }
 
 export interface SshConfig {
@@ -42,6 +45,9 @@ export interface SshConfig {
   private_key_passphrase?: string;
   host_key?: string[];
   client_version?: string;
+  has_password?: boolean;
+  has_private_key?: boolean;
+  has_passphrase?: boolean;
 }
 
 export type ProtocolConfig =

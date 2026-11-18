@@ -78,18 +78,25 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   // Shadowsocks edit fields
   const [editSsMethod, setEditSsMethod] = useState("chacha20-ietf-poly1305");
   const [editSsPassword, setEditSsPassword] = useState("");
+  const [editSsHasPassword, setEditSsHasPassword] = useState(false);
 
   // OpenVPN edit fields
   const [editOvpnProto, setEditOvpnProto] = useState("udp");
   const [editOvpnUsername, setEditOvpnUsername] = useState("");
   const [editOvpnPassword, setEditOvpnPassword] = useState("");
+  const [editOvpnHasPassword, setEditOvpnHasPassword] = useState(false);
 
   // SSH edit fields
   const [editSshUser, setEditSshUser] = useState("root");
   const [editSshPassword, setEditSshPassword] = useState("");
+  const [editSshHasPassword, setEditSshHasPassword] = useState(false);
   const [editSshPrivateKey, setEditSshPrivateKey] = useState("");
+  const [editSshHasPrivateKey, setEditSshHasPrivateKey] = useState(false);
   const [editSshPrivateKeyPath, setEditSshPrivateKeyPath] = useState("");
   const [editSshPassphrase, setEditSshPassphrase] = useState("");
+  const [editSshHasPassphrase, setEditSshHasPassphrase] = useState(false);
+  const [editShowPrivateKey, setEditShowPrivateKey] = useState(false);
+  const [showAddPrivateKey, setShowAddPrivateKey] = useState(false);
 
   const handleImport = async () => {
     try {
@@ -288,19 +295,25 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
     } else if (p.protocol.type === "Shadowsocks") {
       const cfg = p.protocol as ShadowsocksConfig;
       setEditSsMethod(cfg.method || "chacha20-ietf-poly1305");
-      setEditSsPassword(cfg.password || "");
+      setEditSsPassword("");
+      setEditSsHasPassword(Boolean(cfg.has_password || cfg.password));
     } else if (p.protocol.type === "Openvpn") {
       const cfg = p.protocol as OpenvpnConfig;
       setEditOvpnProto(cfg.proto || "udp");
       setEditOvpnUsername(cfg.username || "");
-      setEditOvpnPassword(cfg.password || "");
+      setEditOvpnPassword("");
+      setEditOvpnHasPassword(Boolean(cfg.has_password || cfg.password));
     } else if (p.protocol.type === "Ssh") {
       const cfg = p.protocol as SshConfig;
       setEditSshUser(cfg.user || "root");
-      setEditSshPassword(cfg.password || "");
-      setEditSshPrivateKey(cfg.private_key || "");
+      setEditSshPassword("");
+      setEditSshHasPassword(Boolean(cfg.has_password || cfg.password));
+      setEditSshPrivateKey("");
+      setEditSshHasPrivateKey(Boolean(cfg.has_private_key || cfg.private_key));
       setEditSshPrivateKeyPath(cfg.private_key_path || "");
-      setEditSshPassphrase(cfg.private_key_passphrase || "");
+      setEditSshPassphrase("");
+      setEditSshHasPassphrase(Boolean(cfg.has_passphrase || cfg.private_key_passphrase));
+      setEditShowPrivateKey(false);
     }
   };
 
@@ -353,13 +366,14 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
 
       updatedProtocol = { type: "Vless", ...vlessCfg };
     } else if (editingProfile.protocol.type === "Shadowsocks") {
-      if (!editSsPassword.trim()) {
+      if (!editSsPassword.trim() && !editSsHasPassword) {
         setEditError("Пароль не может быть пустым");
         return;
       }
       const ssCfg: ShadowsocksConfig = {
         method: editSsMethod,
         password: editSsPassword.trim(),
+        has_password: editSsPassword.trim() ? false : editSsHasPassword,
       };
       updatedProtocol = { type: "Shadowsocks", ...ssCfg };
     } else if (editingProfile.protocol.type === "Openvpn") {
@@ -369,6 +383,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         proto: editOvpnProto,
         username: editOvpnUsername.trim() || undefined,
         password: editOvpnPassword || undefined,
+        has_password: editOvpnPassword ? false : editOvpnHasPassword,
       };
       updatedProtocol = { type: "Openvpn", ...ovpnCfg };
     } else {
@@ -377,7 +392,13 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         setEditError("Имя пользователя SSH не может быть пустым");
         return;
       }
-      if (!editSshPassword && !editSshPrivateKey.trim() && !editSshPrivateKeyPath.trim()) {
+      if (
+        !editSshPassword &&
+        !editSshHasPassword &&
+        !editSshPrivateKey.trim() &&
+        !editSshHasPrivateKey &&
+        !editSshPrivateKeyPath.trim()
+      ) {
         setEditError("Укажите пароль или приватный ключ (или путь к ключу)");
         return;
       }
@@ -389,6 +410,9 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
         private_key: editSshPrivateKey.trim() || undefined,
         private_key_path: editSshPrivateKeyPath.trim() || undefined,
         private_key_passphrase: editSshPassphrase || undefined,
+        has_password: editSshPassword ? false : editSshHasPassword,
+        has_private_key: editSshPrivateKey.trim() ? false : editSshHasPrivateKey,
+        has_passphrase: editSshPassphrase ? false : editSshHasPassphrase,
       };
       updatedProtocol = { type: "Ssh", ...sshCfg };
     }
@@ -479,7 +503,9 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
             const sshMissingCreds =
               sshCfg !== null &&
               !sshCfg.password &&
+              !sshCfg.has_password &&
               !sshCfg.private_key?.trim() &&
+              !sshCfg.has_private_key &&
               !sshCfg.private_key_path?.trim();
 
             return (
@@ -947,12 +973,22 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 mb-1">Private Key Content (optional)</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-400">Private Key Content (optional)</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddPrivateKey((v) => !v)}
+                        className="text-[11px] text-slate-400 hover:text-slate-200"
+                      >
+                        {showAddPrivateKey ? "Скрыть" : "Показать"}
+                      </button>
+                    </div>
                     <textarea
                       rows={3}
                       value={sshPrivateKey}
                       onChange={(e) => setSshPrivateKey(e.target.value)}
                       placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                      style={{ WebkitTextSecurity: showAddPrivateKey ? "none" : "disc" } as React.CSSProperties}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-[11px]"
                     />
                   </div>
@@ -1235,8 +1271,11 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                     <input
                       type="password"
                       value={editSsPassword}
-                      onChange={(e) => setEditSsPassword(e.target.value)}
-                      placeholder="Пароль"
+                      onChange={(e) => {
+                        setEditSsPassword(e.target.value);
+                        if (e.target.value) setEditSsHasPassword(false);
+                      }}
+                      placeholder={editSsHasPassword ? "•••••••• (сохранён, оставьте пустым)" : "Пароль"}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-orange-500"
                     />
                   </div>
@@ -1274,8 +1313,11 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                     <input
                       type="password"
                       value={editOvpnPassword}
-                      onChange={(e) => setEditOvpnPassword(e.target.value)}
-                      placeholder="Password"
+                      onChange={(e) => {
+                        setEditOvpnPassword(e.target.value);
+                        if (e.target.value) setEditOvpnHasPassword(false);
+                      }}
+                      placeholder={editOvpnHasPassword ? "•••••••• (сохранён, оставьте пустым)" : "Password"}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-orange-500"
                     />
                   </div>
@@ -1301,8 +1343,11 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                     <input
                       type="password"
                       value={editSshPassword}
-                      onChange={(e) => setEditSshPassword(e.target.value)}
-                      placeholder="SSH пароль"
+                      onChange={(e) => {
+                        setEditSshPassword(e.target.value);
+                        if (e.target.value) setEditSshHasPassword(false);
+                      }}
+                      placeholder={editSshHasPassword ? "•••••••• (сохранён, оставьте пустым)" : "SSH пароль"}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-orange-500"
                     />
                   </div>
@@ -1319,14 +1364,56 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Приватный ключ (текст, опционально)</label>
-                    <textarea
-                      rows={3}
-                      value={editSshPrivateKey}
-                      onChange={(e) => setEditSshPrivateKey(e.target.value)}
-                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-orange-500"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-400">Приватный ключ (текст, опционально)</label>
+                      {!editSshHasPrivateKey && (
+                        <button
+                          type="button"
+                          onClick={() => setEditShowPrivateKey((v) => !v)}
+                          className="text-[11px] text-slate-400 hover:text-slate-200"
+                        >
+                          {editShowPrivateKey ? "Скрыть" : "Показать"}
+                        </button>
+                      )}
+                    </div>
+                    {editSshHasPrivateKey ? (
+                      <div className="flex items-center justify-between gap-2 bg-slate-950 border border-emerald-800/50 rounded-xl px-3 py-2.5 text-slate-300">
+                        <span className="text-[11px] text-emerald-400">
+                          Ключ сохранён в защищённом хранилище (скрыт)
+                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditSshHasPrivateKey(false);
+                              setEditSshPrivateKey("");
+                            }}
+                            className="text-[11px] px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                          >
+                            Заменить
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditSshHasPrivateKey(false);
+                              setEditSshPrivateKey("");
+                            }}
+                            className="text-[11px] px-2 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/60 text-rose-300"
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <textarea
+                        rows={3}
+                        value={editSshPrivateKey}
+                        onChange={(e) => setEditSshPrivateKey(e.target.value)}
+                        placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                        style={{ WebkitTextSecurity: editShowPrivateKey ? "none" : "disc" } as React.CSSProperties}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-orange-500"
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -1334,8 +1421,11 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                     <input
                       type="password"
                       value={editSshPassphrase}
-                      onChange={(e) => setEditSshPassphrase(e.target.value)}
-                      placeholder="Passphrase"
+                      onChange={(e) => {
+                        setEditSshPassphrase(e.target.value);
+                        if (e.target.value) setEditSshHasPassphrase(false);
+                      }}
+                      placeholder={editSshHasPassphrase ? "•••••••• (сохранена, оставьте пустым)" : "Passphrase"}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-orange-500"
                     />
                   </div>

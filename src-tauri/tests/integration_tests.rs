@@ -115,6 +115,7 @@ fn test_scenario_04_save_and_load_profiles() {
         ShadowsocksConfig {
             method: "aes-256-gcm".to_string(),
             password: "test".to_string(),
+            has_password: false,
         },
     );
 
@@ -303,6 +304,7 @@ async fn test_scenario_11_failed_core_launch() {
         ShadowsocksConfig {
             method: "aes-256-gcm".to_string(),
             password: "pass".to_string(),
+            has_password: false,
         },
     );
     profile_mgr.add(profile.clone());
@@ -473,6 +475,7 @@ async fn test_scenario_15_dual_vpn_split_tunnel_routing() {
         ShadowsocksConfig {
             method: "aes-128-gcm".to_string(),
             password: "test-pass".to_string(),
+            has_password: false,
         },
     );
 
@@ -495,6 +498,8 @@ async fn test_scenario_15_dual_vpn_split_tunnel_routing() {
             raw_ovpn: Some("#iroute 192.168.100.0 255.255.254.0".to_string()),
             auth: None,
             server_name: None,
+            has_password: false,
+            has_client_key: false,
         },
     );
 

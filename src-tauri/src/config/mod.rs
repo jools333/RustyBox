@@ -1,5 +1,6 @@
 use crate::profiles::Profile;
 use crate::routing::{RoutingRule, RuleAction};
+use crate::secrets::{write_secure_file, SecretVault};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -95,28 +96,65 @@ impl Default for AppConfig {
     }
 }
 
+impl AppConfig {
+    pub fn redacted_for_ui(&self) -> Self {
+        let mut copy = self.clone();
+        copy.profiles = copy.profiles.iter().map(|p| p.redacted_for_ui()).collect();
+        copy
+    }
+}
+
 #[derive(Clone)]
 pub struct ConfigManager {
     config: Arc<RwLock<AppConfig>>,
     path: Arc<RwLock<PathBuf>>,
+    vault: SecretVault,
 }
 
 impl ConfigManager {
     pub fn new(path: PathBuf) -> Self {
-        let cfg = Self::load_or_default(&path);
+        let vault = SecretVault::new();
+        if let Some(dir) = path.parent() {
+            vault.init_for_dir(dir);
+        }
+        let cfg = Self::load_or_default(&path, &vault);
         Self {
             config: Arc::new(RwLock::new(cfg)),
             path: Arc::new(RwLock::new(path)),
+            vault,
         }
     }
 
     pub fn set_path(&self, new_path: PathBuf) {
-        let cfg = Self::load_or_default(&new_path);
+        if let Some(dir) = new_path.parent() {
+            self.vault.init_for_dir(dir);
+        }
+        let cfg = Self::load_or_default(&new_path, &self.vault);
         if let Ok(mut p) = self.path.write() {
             *p = new_path;
         }
         if let Ok(mut c) = self.config.write() {
             *c = cfg;
+        }
+    }
+
+    #[cfg(all(feature = "gui", target_os = "android"))]
+    pub fn init_android_vault(&self, handle: &tauri::AppHandle) {
+        let path = self
+            .path
+            .read()
+            .map(|p| p.clone())
+            .unwrap_or_else(|_| Self::default_path());
+        if let Some(dir) = path.parent() {
+            self.vault.init_android(handle, dir);
+        }
+        let cfg = Self::load_or_default(&path, &self.vault);
+        if let Ok(mut c) = self.config.write() {
+            *c = cfg.clone();
+        }
+        // Re-save to migrate any legacy plaintext secrets to encrypted form
+        if !cfg.profiles.is_empty() {
+            let _ = self.save_config(cfg);
         }
     }
 
@@ -137,16 +175,17 @@ impl ConfigManager {
     }
 
     pub fn save_config(&self, new_config: AppConfig) -> Result<(), ConfigError> {
-        let json = serde_json::to_string_pretty(&new_config)?;
+        let mut disk_config = new_config.clone();
+        for profile in &mut disk_config.profiles {
+            self.vault.encrypt_profile(profile);
+        }
+        let json = serde_json::to_string_pretty(&disk_config)?;
         let path = self
             .path
             .read()
             .map(|p| p.clone())
             .unwrap_or_else(|_| Self::default_path());
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&path, json)?;
+        write_secure_file(&path, json.as_bytes())?;
         if let Ok(mut lock) = self.config.write() {
             *lock = new_config;
         }
@@ -162,7 +201,7 @@ impl ConfigManager {
         self.save_config(cfg)
     }
 
-    fn load_or_default(path: &Path) -> AppConfig {
+    fn load_or_default(path: &Path, vault: &SecretVault) -> AppConfig {
         if !path.exists() {
             return AppConfig::default();
         }
@@ -172,6 +211,9 @@ impl ConfigManager {
                 Ok(mut config) => {
                     if config.version < 1 {
                         config.version = 1;
+                    }
+                    for profile in &mut config.profiles {
+                        vault.decrypt_profile(profile);
                     }
                     config
                 }

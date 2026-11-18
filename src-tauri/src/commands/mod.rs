@@ -26,7 +26,12 @@ pub async fn disconnect_vpn(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_profiles(state: State<'_, AppState>) -> Vec<Profile> {
-    state.profiles.list()
+    state
+        .profiles
+        .list()
+        .into_iter()
+        .map(|p| p.redacted_for_ui())
+        .collect()
 }
 
 #[tauri::command]
@@ -38,7 +43,7 @@ pub fn add_profile(state: State<'_, AppState>, profile: Profile) -> Result<Profi
             c.active_profile_id = Some(profile.id.clone());
         }
     });
-    Ok(profile)
+    Ok(profile.redacted_for_ui())
 }
 
 #[tauri::command]
@@ -50,7 +55,7 @@ pub fn import_profile_uri(state: State<'_, AppState>, uri: String) -> Result<Pro
             c.active_profile_id = Some(profile.id.clone());
         }
     });
-    Ok(profile)
+    Ok(profile.redacted_for_ui())
 }
 
 #[tauri::command]
@@ -79,7 +84,7 @@ pub fn import_ovpn_file(
             c.active_profile_id = Some(profile.id.clone());
         }
     });
-    Ok(profile)
+    Ok(profile.redacted_for_ui())
 }
 
 #[tauri::command]
@@ -127,15 +132,18 @@ pub fn import_ovpn_content(
             c.active_profile_id = Some(profile.id.clone());
         }
     });
-    Ok(profile)
+    Ok(profile.redacted_for_ui())
 }
 
 #[tauri::command]
 pub async fn update_profile(
     state: State<'_, AppState>,
-    profile: Profile,
+    mut profile: Profile,
 ) -> Result<Profile, String> {
     let profile_id = profile.id.clone();
+    if let Some(existing) = state.profiles.get(&profile_id) {
+        profile.merge_redacted_secrets(&existing);
+    }
     state.profiles.update(profile).map_err(|e| e.to_string())?;
     let updated = state
         .profiles
@@ -153,7 +161,7 @@ pub async fn update_profile(
         let _ = state.vpn.reconnect().await;
     }
 
-    Ok(updated)
+    Ok(updated.redacted_for_ui())
 }
 
 #[tauri::command]
@@ -235,17 +243,23 @@ pub fn delete_routing_rule(state: State<'_, AppState>, id: String) -> Result<(),
 
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> AppConfig {
-    state.config.get_config()
+    state.config.get_config().redacted_for_ui()
 }
 
 #[tauri::command]
 pub fn save_config(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-    config: AppConfig,
+    mut config: AppConfig,
 ) -> Result<(), String> {
     if let Err(e) = crate::platform::autostart::set_enabled(&app, config.auto_start) {
         tracing::warn!("Failed to set autostart: {}", e);
+    }
+
+    for p in &mut config.profiles {
+        if let Some(existing) = state.profiles.get(&p.id) {
+            p.merge_redacted_secrets(&existing);
+        }
     }
 
     state.routing.set_rules(config.rules.clone());

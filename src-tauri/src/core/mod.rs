@@ -1229,7 +1229,7 @@ impl CoreManager {
         let temp_dir = std::env::temp_dir();
         let config_path = temp_dir.join(format!("rustybox_run_{}.json", uuid::Uuid::new_v4()));
         let json_str = serde_json::to_string_pretty(config)?;
-        std::fs::write(&config_path, json_str)?;
+        crate::secrets::write_secure_file(&config_path, json_str.as_bytes())?;
 
         if let Ok(mut recent) = self.recent_output.lock() {
             recent.clear();
@@ -1661,6 +1661,7 @@ mod tests {
         let ss_cfg = ShadowsocksConfig {
             method: "chacha20-ietf-poly1305".to_string(),
             password: "mypassword123".to_string(),
+            has_password: false,
         };
         let profile =
             Profile::new_shadowsocks("Test SS".to_string(), "9.9.9.9".to_string(), 8388, ss_cfg);
@@ -1821,6 +1822,8 @@ mod tests {
                 raw_ovpn: None,
                 auth: None,
                 server_name: None,
+                has_password: false,
+                has_client_key: false,
             },
         );
 
@@ -1910,6 +1913,8 @@ mod tests {
                 raw_ovpn: Some("iroute 192.168.100.0 255.255.254.0".to_string()),
                 auth: None,
                 server_name: None,
+                has_password: false,
+                has_client_key: false,
             },
         );
 
@@ -1971,6 +1976,9 @@ mod tests {
                 private_key_passphrase: None,
                 host_key: None,
                 client_version: None,
+                has_password: false,
+                has_private_key: false,
+                has_passphrase: false,
             },
         );
 

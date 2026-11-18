@@ -102,12 +102,14 @@ impl ConnectionManager {
         let active_profile = cfg
             .active_profile_id
             .as_deref()
-            .and_then(|id| self.profile_manager.get(id));
+            .and_then(|id| self.profile_manager.get(id))
+            .map(|p| p.redacted_for_ui());
         let work_profile = if cfg.work_profile_enabled {
             cfg.work_profile_id
                 .as_deref()
                 .filter(|id| Some(*id) != cfg.active_profile_id.as_deref())
                 .and_then(|id| self.profile_manager.get(id))
+                .map(|p| p.redacted_for_ui())
         } else {
             None
         };

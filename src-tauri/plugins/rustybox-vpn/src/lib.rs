@@ -17,6 +17,12 @@ pub struct VpnStatusResponse {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MasterKeyResponse {
+    pub key: String,
+}
+
 pub struct RustyBoxVpn<R: Runtime> {
     #[allow(dead_code)]
     handle: PluginHandle<R>,
@@ -65,6 +71,20 @@ impl<R: Runtime> RustyBoxVpn<R> {
                 running: false,
                 error: None,
             })
+        }
+    }
+
+    pub fn get_or_create_master_key(&self) -> Result<String, String> {
+        #[cfg(target_os = "android")]
+        {
+            self.handle
+                .run_mobile_plugin::<MasterKeyResponse>("getOrCreateMasterKey", ())
+                .map(|r| r.key)
+                .map_err(|e| e.to_string())
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Err("Android Keystore is only supported on Android".to_string())
         }
     }
 }
