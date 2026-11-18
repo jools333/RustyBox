@@ -52,12 +52,16 @@ class RustyBoxVpnService : VpnService() {
             ACTION_START -> {
                 val config = intent.getStringExtra(EXTRA_CONFIG) ?: return START_NOT_STICKY
                 startForegroundNotification()
-                startBox(config)
+                Thread {
+                    startBox(config)
+                }.start()
             }
             ACTION_STOP -> {
-                stopBox()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                Thread {
+                    stopBox()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }.start()
             }
         }
         return START_STICKY
@@ -87,6 +91,7 @@ class RustyBoxVpnService : VpnService() {
         startForeground(NOTIFICATION_ID, notification)
     }
 
+    @Synchronized
     private fun startBox(configJson: String) {
         stopBox()
         lastError = null
@@ -103,9 +108,10 @@ class RustyBoxVpnService : VpnService() {
                 override fun localDNSTransport(): LocalDNSTransport? = null
 
                 override fun openTun(options: TunOptions): Int {
+                    val mtu = if (options.mtu > 0) options.mtu else 1500
                     val builder = Builder()
                         .setSession("RustyBox")
-                        .setMtu(options.mtu)
+                        .setMtu(mtu)
                         .addAddress("172.19.0.1", 30)
                         .addRoute("0.0.0.0", 0)
                         .addDnsServer("1.1.1.1")
@@ -129,7 +135,9 @@ class RustyBoxVpnService : VpnService() {
                     sourcePort: Int,
                     destinationAddress: String?,
                     destinationPort: Int
-                ): ConnectionOwner? = null
+                ): ConnectionOwner = ConnectionOwner().apply {
+                    userId = -1
+                }
 
                 override fun underNetworkExtension(): Boolean = false
                 override fun includeAllNetworks(): Boolean = false
@@ -137,7 +145,10 @@ class RustyBoxVpnService : VpnService() {
                 override fun readWIFIState(): WIFIState? = null
                 override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
                 override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
-                override fun getInterfaces(): NetworkInterfaceIterator? = null
+                override fun getInterfaces(): NetworkInterfaceIterator = object : NetworkInterfaceIterator {
+                    override fun hasNext(): Boolean = false
+                    override fun next(): io.nekohasekai.libbox.NetworkInterface? = null
+                }
                 override fun sendNotification(notification: io.nekohasekai.libbox.Notification?) {}
                 override fun cancelNotification(identifier: String?, typeID: Int) {}
                 override fun startNeighborMonitor(listener: NeighborUpdateListener?) {}
@@ -191,6 +202,7 @@ class RustyBoxVpnService : VpnService() {
         }
     }
 
+    @Synchronized
     private fun stopBox() {
         try {
             commandServer?.closeService()
