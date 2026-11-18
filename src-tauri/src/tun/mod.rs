@@ -222,6 +222,11 @@ impl TunManager {
         route_exclude_address: &[String],
     ) -> serde_json::Value {
         let effective_mtu = if mtu == 0 { 1500 } else { mtu };
+        let stack = if cfg!(target_os = "android") {
+            "gvisor"
+        } else {
+            "mixed"
+        };
         let mut inbound = serde_json::json!({
             "type": "tun",
             "tag": "tun-in",
@@ -232,7 +237,7 @@ impl TunManager {
             ],
             "auto_route": true,
             "strict_route": true,
-            "stack": "mixed"
+            "stack": stack
         });
         if !route_exclude_address.is_empty() {
             inbound["route_exclude_address"] = serde_json::json!(route_exclude_address);
