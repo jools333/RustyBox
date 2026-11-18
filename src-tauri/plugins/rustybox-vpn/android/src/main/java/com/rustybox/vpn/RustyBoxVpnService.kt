@@ -4,6 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -46,6 +50,7 @@ class RustyBoxVpnService : VpnService() {
 
     private var commandServer: CommandServer? = null
     private var tunFd: ParcelFileDescriptor? = null
+    private var defaultNetworkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -143,11 +148,105 @@ class RustyBoxVpnService : VpnService() {
                 override fun includeAllNetworks(): Boolean = false
                 override fun clearDNSCache() {}
                 override fun readWIFIState(): WIFIState? = null
-                override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
-                override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
-                override fun getInterfaces(): NetworkInterfaceIterator = object : NetworkInterfaceIterator {
-                    override fun hasNext(): Boolean = false
-                    override fun next(): io.nekohasekai.libbox.NetworkInterface? = null
+                override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {
+                    val cm = getSystemService(ConnectivityManager::class.java) ?: return
+                    fun notifyNetwork(network: Network?) {
+                        if (network == null) {
+                            listener?.updateDefaultInterface("", -1, false, false)
+                            return
+                        }
+                        val lp = cm.getLinkProperties(network) ?: return
+                        val ifName = lp.interfaceName ?: return
+                        val caps = cm.getNetworkCapabilities(network)
+                        val isExpensive = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
+                        val ifIndex = try {
+                            java.net.NetworkInterface.getByName(ifName)?.index ?: -1
+                        } catch (_: Exception) {
+                            -1
+                        }
+                        if (ifIndex >= 0) {
+                            listener?.updateDefaultInterface(ifName, ifIndex, isExpensive, false)
+                        }
+                    }
+
+                    notifyNetwork(cm.activeNetwork)
+
+                    val callback = object : ConnectivityManager.NetworkCallback() {
+                        override fun onAvailable(network: Network) {
+                            notifyNetwork(network)
+                        }
+
+                        override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                            notifyNetwork(network)
+                        }
+
+                        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                            notifyNetwork(network)
+                        }
+
+                        override fun onLost(network: Network) {
+                            notifyNetwork(cm.activeNetwork)
+                        }
+                    }
+                    defaultNetworkCallback = callback
+                    try {
+                        cm.registerDefaultNetworkCallback(callback)
+                    } catch (_: Exception) {
+                    }
+                }
+
+                override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {
+                    val cb = defaultNetworkCallback ?: return
+                    defaultNetworkCallback = null
+                    try {
+                        val cm = getSystemService(ConnectivityManager::class.java)
+                        cm?.unregisterNetworkCallback(cb)
+                    } catch (_: Exception) {
+                    }
+                }
+
+                override fun getInterfaces(): NetworkInterfaceIterator {
+                    val result = mutableListOf<io.nekohasekai.libbox.NetworkInterface>()
+                    try {
+                        val cm = getSystemService(ConnectivityManager::class.java)
+                        val activeCaps = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                        val activeIfName = cm?.activeNetwork?.let { cm.getLinkProperties(it)?.interfaceName }
+                        val netIfs = java.net.NetworkInterface.getNetworkInterfaces()
+                        while (netIfs != null && netIfs.hasMoreElements()) {
+                            val nif = netIfs.nextElement()
+                            if (!nif.isUp) continue
+                            val addrs = nif.interfaceAddresses.mapNotNull { ia ->
+                                val host = ia.address?.hostAddress?.substringBefore('%') ?: return@mapNotNull null
+                                "$host/${ia.networkPrefixLength}"
+                            }
+                            if (addrs.isEmpty()) continue
+                            val libIf = io.nekohasekai.libbox.NetworkInterface().apply {
+                                index = nif.index
+                                name = nif.name
+                                mtu = try { nif.mtu } catch (_: Exception) { 1500 }
+                                flags = (if (nif.isUp) 1 else 0) or (if (nif.isLoopback) 8 else 64)
+                                addresses = stringIteratorOf(addrs)
+                                type = if (nif.name == activeIfName && activeCaps != null) {
+                                    when {
+                                        activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> Libbox.InterfaceTypeWIFI
+                                        activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> Libbox.InterfaceTypeCellular
+                                        activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> Libbox.InterfaceTypeEthernet
+                                        else -> Libbox.InterfaceTypeOther
+                                    }
+                                } else {
+                                    Libbox.InterfaceTypeOther
+                                }
+                            }
+                            result.add(libIf)
+                        }
+                    } catch (_: Exception) {
+                    }
+                    var idx = 0
+                    return object : NetworkInterfaceIterator {
+                        override fun hasNext(): Boolean = idx < result.size
+                        override fun next(): io.nekohasekai.libbox.NetworkInterface? =
+                            if (idx < result.size) result[idx++] else null
+                    }
                 }
                 override fun sendNotification(notification: io.nekohasekai.libbox.Notification?) {}
                 override fun cancelNotification(identifier: String?, typeID: Int) {}
@@ -200,6 +299,13 @@ class RustyBoxVpnService : VpnService() {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+    }
+
+    private fun stringIteratorOf(items: List<String>): StringIterator = object : StringIterator {
+        private var idx = 0
+        override fun len(): Int = items.size
+        override fun hasNext(): Boolean = idx < items.size
+        override fun next(): String = if (idx < items.size) items[idx++] else ""
     }
 
     @Synchronized
