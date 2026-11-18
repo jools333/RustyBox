@@ -59,6 +59,8 @@ pub struct CoreManager {
     last_exit_error: Arc<Mutex<Option<String>>>,
     log_manager: LogManager,
     tun_manager: TunManager,
+    #[cfg(all(feature = "gui", target_os = "android"))]
+    app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
 
 /// Strips ANSI terminal escape codes from text (e.g. \x1b[36m, \x1b[0m).
@@ -222,6 +224,15 @@ impl CoreManager {
             last_exit_error: Arc::new(Mutex::new(None)),
             log_manager,
             tun_manager: TunManager::new(),
+            #[cfg(all(feature = "gui", target_os = "android"))]
+            app_handle: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    #[cfg(all(feature = "gui", target_os = "android"))]
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        if let Ok(mut lock) = self.app_handle.lock() {
+            *lock = Some(handle);
         }
     }
 
@@ -242,34 +253,58 @@ impl CoreManager {
     /// keep reporting "Connected" while traffic goes out directly through the
     /// ISP.
     pub fn is_running(&self) -> bool {
-        let mut lock = match self.process.lock() {
-            Ok(lock) => lock,
-            Err(_) => return false,
-        };
-
-        let proc = match lock.as_mut() {
-            Some(proc) => proc,
-            None => return false,
-        };
-
-        match proc.child.try_wait() {
-            Ok(None) => true,
-            Ok(Some(status)) => {
-                let output = self.recent_output_text();
-                let message = if output.is_empty() {
-                    format!("sing-box core exited unexpectedly ({})", status)
-                } else {
-                    format!("sing-box core exited unexpectedly ({}): {}", status, output)
-                };
-                self.log_manager.add_log("error", &message);
-                if let Ok(mut last) = self.last_exit_error.lock() {
-                    *last = Some(message);
+        #[cfg(all(feature = "gui", target_os = "android"))]
+        {
+            if let Some(handle) = self.app_handle.lock().ok().and_then(|g| g.clone()) {
+                use tauri_plugin_rustybox_vpn::RustyBoxVpnExt;
+                match handle.rustybox_vpn().get_vpn_status() {
+                    Ok(status) => {
+                        if !status.running {
+                            if let Some(err) = status.error {
+                                if let Ok(mut last) = self.last_exit_error.lock() {
+                                    *last = Some(err);
+                                }
+                            }
+                        }
+                        return status.running;
+                    }
+                    Err(_) => return false,
                 }
-                let _ = std::fs::remove_file(&proc.config_path);
-                *lock = None;
-                false
             }
-            Err(_) => false,
+            return false;
+        }
+
+        #[cfg(not(all(feature = "gui", target_os = "android")))]
+        {
+            let mut lock = match self.process.lock() {
+                Ok(lock) => lock,
+                Err(_) => return false,
+            };
+
+            let proc = match lock.as_mut() {
+                Some(proc) => proc,
+                None => return false,
+            };
+
+            match proc.child.try_wait() {
+                Ok(None) => true,
+                Ok(Some(status)) => {
+                    let output = self.recent_output_text();
+                    let message = if output.is_empty() {
+                        format!("sing-box core exited unexpectedly ({})", status)
+                    } else {
+                        format!("sing-box core exited unexpectedly ({}): {}", status, output)
+                    };
+                    self.log_manager.add_log("error", &message);
+                    if let Ok(mut last) = self.last_exit_error.lock() {
+                        *last = Some(message);
+                    }
+                    let _ = std::fs::remove_file(&proc.config_path);
+                    *lock = None;
+                    false
+                }
+                Err(_) => false,
+            }
         }
     }
 
@@ -470,32 +505,40 @@ impl CoreManager {
             }
         }
 
-        let binary = normalize_path(&self.find_binary().ok_or(CoreError::BinaryNotFound)?);
-        let mut cmd = std::process::Command::new(&binary);
-        if let Some(parent) = binary.parent() {
-            cmd.current_dir(parent);
-        }
-        cmd.arg("version")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        #[cfg(target_os = "windows")]
+        #[cfg(target_os = "android")]
         {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000);
+            return Ok("libbox (embedded)".to_string());
         }
-        let output = cmd.output()?;
 
-        if output.status.success() {
-            let ver = String::from_utf8_lossy(&output.stdout);
-            let result = ver.lines().next().unwrap_or("sing-box").trim().to_string();
-            if let Ok(mut lock) = self.cached_version.lock() {
-                *lock = Some(result.clone());
+        #[cfg(not(target_os = "android"))]
+        {
+            let binary = normalize_path(&self.find_binary().ok_or(CoreError::BinaryNotFound)?);
+            let mut cmd = std::process::Command::new(&binary);
+            if let Some(parent) = binary.parent() {
+                cmd.current_dir(parent);
             }
-            Ok(result)
-        } else {
-            let err = String::from_utf8_lossy(&output.stderr);
-            Err(CoreError::ValidationFailed(err.to_string()))
+            cmd.arg("version")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000);
+            }
+            let output = cmd.output()?;
+
+            if output.status.success() {
+                let ver = String::from_utf8_lossy(&output.stdout);
+                let result = ver.lines().next().unwrap_or("sing-box").trim().to_string();
+                if let Ok(mut lock) = self.cached_version.lock() {
+                    *lock = Some(result.clone());
+                }
+                Ok(result)
+            } else {
+                let err = String::from_utf8_lossy(&output.stderr);
+                Err(CoreError::ValidationFailed(err.to_string()))
+            }
         }
     }
 
@@ -1083,6 +1126,12 @@ impl CoreManager {
     }
 
     pub async fn start_core(&self, config: serde_json::Value) -> Result<u32, CoreError> {
+        #[cfg(all(feature = "gui", target_os = "android"))]
+        {
+            return self.start_core_android(&config).await;
+        }
+
+        #[cfg(not(all(feature = "gui", target_os = "android")))]
         match self.start_core_attempt(&config).await {
             Ok(pid) => Ok(pid),
             Err(CoreError::StartFailed(ref msg))
@@ -1102,6 +1151,64 @@ impl CoreManager {
                 self.start_core_attempt(&config).await
             }
             Err(e) => Err(e),
+        }
+    }
+
+    #[cfg(all(feature = "gui", target_os = "android"))]
+    async fn start_core_android(&self, config: &serde_json::Value) -> Result<u32, CoreError> {
+        let handle = self
+            .app_handle
+            .lock()
+            .map_err(|e| CoreError::Lock(e.to_string()))?
+            .clone()
+            .ok_or_else(|| {
+                CoreError::StartFailed("Android AppHandle is not initialized".to_string())
+            })?;
+
+        if let Ok(mut last) = self.last_exit_error.lock() {
+            *last = None;
+        }
+
+        let json_str = serde_json::to_string_pretty(config)?;
+        self.log_manager
+            .add_log("info", "Starting Android VPN service via libbox...");
+
+        let h = handle.clone();
+        tokio::task::spawn_blocking(move || {
+            use tauri_plugin_rustybox_vpn::RustyBoxVpnExt;
+            h.rustybox_vpn().start_vpn(json_str)
+        })
+        .await
+        .map_err(|e| CoreError::StartFailed(format!("Task join error: {}", e)))?
+        .map_err(CoreError::StartFailed)?;
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let h_status = handle.clone();
+            let status = tokio::task::spawn_blocking(move || {
+                use tauri_plugin_rustybox_vpn::RustyBoxVpnExt;
+                h_status.rustybox_vpn().get_vpn_status()
+            })
+            .await
+            .map_err(|e| CoreError::StartFailed(format!("Task join error: {}", e)))?
+            .map_err(CoreError::StartFailed)?;
+
+            if status.running {
+                self.log_manager
+                    .add_log("info", "Android VPN service (libbox) started");
+                return Ok(1);
+            }
+            if let Some(err) = status.error {
+                self.log_manager
+                    .add_log("error", &format!("Android VPN service error: {}", err));
+                return Err(CoreError::StartFailed(err));
+            }
+            if Instant::now() >= deadline {
+                let msg = "Timed out waiting for Android VPN service to start".to_string();
+                self.log_manager.add_log("error", &msg);
+                return Err(CoreError::StartFailed(msg));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 
@@ -1323,107 +1430,152 @@ impl CoreManager {
     }
 
     pub async fn stop_core(&self) -> Result<(), CoreError> {
-        let mut proc_opt = {
-            let mut lock = self
-                .process
+        #[cfg(all(feature = "gui", target_os = "android"))]
+        {
+            let handle = self
+                .app_handle
                 .lock()
-                .map_err(|e| CoreError::Lock(e.to_string()))?;
-            lock.take()
-        };
+                .map_err(|e| CoreError::Lock(e.to_string()))?
+                .clone()
+                .ok_or(CoreError::NotRunning)?;
 
-        if let Some(mut proc) = proc_opt.take() {
             self.log_manager
-                .add_log("info", "Stopping sing-box core process...");
+                .add_log("info", "Stopping Android VPN service...");
 
-            #[cfg(target_os = "windows")]
-            {
-                extern "system" {
-                    fn AttachConsole(dwProcessId: u32) -> i32;
-                    fn FreeConsole() -> i32;
-                    fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32) -> i32;
-                    fn SetConsoleCtrlHandler(
-                        handlerRoutine: Option<extern "system" fn(u32) -> i32>,
-                        add: i32,
-                    ) -> i32;
-                    fn GetStdHandle(nStdHandle: u32) -> isize;
-                    fn SetStdHandle(nStdHandle: u32, hHandle: isize) -> i32;
-                }
-                extern "system" fn ignore_console_ctrl(_: u32) -> i32 {
-                    1 // TRUE: event handled, prevents Windows from terminating the parent process
-                }
-                const CTRL_BREAK_EVENT: u32 = 1;
-                const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6;
-                const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5;
-                const STD_ERROR_HANDLE: u32 = 0xFFFFFFF4;
+            let h = handle.clone();
+            tokio::task::spawn_blocking(move || {
+                use tauri_plugin_rustybox_vpn::RustyBoxVpnExt;
+                h.rustybox_vpn().stop_vpn()
+            })
+            .await
+            .map_err(|e| CoreError::StartFailed(format!("Task join error: {}", e)))?
+            .map_err(CoreError::StartFailed)?;
 
-                // Signal sing-box for graceful teardown (routes restore and Wintun adapter cleanup)
-                unsafe {
-                    let h_in = GetStdHandle(STD_INPUT_HANDLE);
-                    let h_out = GetStdHandle(STD_OUTPUT_HANDLE);
-                    let h_err = GetStdHandle(STD_ERROR_HANDLE);
-
-                    if AttachConsole(proc.pid) != 0 {
-                        SetConsoleCtrlHandler(Some(ignore_console_ctrl), 1);
-                        // Send CTRL_BREAK specifically to the child's process group (proc.pid)
-                        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
-                        FreeConsole();
-                        SetConsoleCtrlHandler(Some(ignore_console_ctrl), 0);
-
-                        // FreeConsole invalidates std handles for the process. Restore them:
-                        SetStdHandle(STD_INPUT_HANDLE, h_in);
-                        SetStdHandle(STD_OUTPUT_HANDLE, h_out);
-                        SetStdHandle(STD_ERROR_HANDLE, h_err);
-                    } else {
-                        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
+            for _ in 0..20 {
+                let h_status = handle.clone();
+                if let Ok(Ok(st)) = tokio::task::spawn_blocking(move || {
+                    use tauri_plugin_rustybox_vpn::RustyBoxVpnExt;
+                    h_status.rustybox_vpn().get_vpn_status()
+                })
+                .await
+                {
+                    if !st.running {
+                        break;
                     }
                 }
-                // Wait up to 5s for graceful exit (routes restore and Wintun adapter cleanup)
-                let graceful_exit =
-                    tokio::time::timeout(Duration::from_millis(5000), proc.child.wait()).await;
-
-                if graceful_exit.is_err() {
-                    let _ = proc.child.kill().await;
-                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
 
-            #[cfg(unix)]
-            {
-                extern "C" {
-                    fn kill(pid: i32, sig: i32) -> i32;
-                }
-                const SIGTERM: i32 = 15;
-                if proc.pid > 0 {
+            self.log_manager
+                .add_log("info", "Android VPN service stopped");
+            return Ok(());
+        }
+
+        #[cfg(not(all(feature = "gui", target_os = "android")))]
+        {
+            let mut proc_opt = {
+                let mut lock = self
+                    .process
+                    .lock()
+                    .map_err(|e| CoreError::Lock(e.to_string()))?;
+                lock.take()
+            };
+
+            if let Some(mut proc) = proc_opt.take() {
+                self.log_manager
+                    .add_log("info", "Stopping sing-box core process...");
+
+                #[cfg(target_os = "windows")]
+                {
+                    extern "system" {
+                        fn AttachConsole(dwProcessId: u32) -> i32;
+                        fn FreeConsole() -> i32;
+                        fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32)
+                            -> i32;
+                        fn SetConsoleCtrlHandler(
+                            handlerRoutine: Option<extern "system" fn(u32) -> i32>,
+                            add: i32,
+                        ) -> i32;
+                        fn GetStdHandle(nStdHandle: u32) -> isize;
+                        fn SetStdHandle(nStdHandle: u32, hHandle: isize) -> i32;
+                    }
+                    extern "system" fn ignore_console_ctrl(_: u32) -> i32 {
+                        1 // TRUE: event handled, prevents Windows from terminating the parent process
+                    }
+                    const CTRL_BREAK_EVENT: u32 = 1;
+                    const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6;
+                    const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5;
+                    const STD_ERROR_HANDLE: u32 = 0xFFFFFFF4;
+
+                    // Signal sing-box for graceful teardown (routes restore and Wintun adapter cleanup)
                     unsafe {
-                        kill(proc.pid as i32, SIGTERM);
+                        let h_in = GetStdHandle(STD_INPUT_HANDLE);
+                        let h_out = GetStdHandle(STD_OUTPUT_HANDLE);
+                        let h_err = GetStdHandle(STD_ERROR_HANDLE);
+
+                        if AttachConsole(proc.pid) != 0 {
+                            SetConsoleCtrlHandler(Some(ignore_console_ctrl), 1);
+                            // Send CTRL_BREAK specifically to the child's process group (proc.pid)
+                            GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
+                            FreeConsole();
+                            SetConsoleCtrlHandler(Some(ignore_console_ctrl), 0);
+
+                            // FreeConsole invalidates std handles for the process. Restore them:
+                            SetStdHandle(STD_INPUT_HANDLE, h_in);
+                            SetStdHandle(STD_OUTPUT_HANDLE, h_out);
+                            SetStdHandle(STD_ERROR_HANDLE, h_err);
+                        } else {
+                            GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, proc.pid);
+                        }
+                    }
+                    // Wait up to 5s for graceful exit (routes restore and Wintun adapter cleanup)
+                    let graceful_exit =
+                        tokio::time::timeout(Duration::from_millis(5000), proc.child.wait()).await;
+
+                    if graceful_exit.is_err() {
+                        let _ = proc.child.kill().await;
                     }
                 }
-                // Wait up to 5s for graceful exit (routes & DNS restoration, utun/tun cleanup)
-                let graceful_exit =
-                    tokio::time::timeout(Duration::from_millis(5000), proc.child.wait()).await;
 
-                if graceful_exit.is_err() {
+                #[cfg(unix)]
+                {
+                    extern "C" {
+                        fn kill(pid: i32, sig: i32) -> i32;
+                    }
+                    const SIGTERM: i32 = 15;
+                    if proc.pid > 0 {
+                        unsafe {
+                            kill(proc.pid as i32, SIGTERM);
+                        }
+                    }
+                    // Wait up to 5s for graceful exit (routes & DNS restoration, utun/tun cleanup)
+                    let graceful_exit =
+                        tokio::time::timeout(Duration::from_millis(5000), proc.child.wait()).await;
+
+                    if graceful_exit.is_err() {
+                        let _ = proc.child.kill().await;
+                    }
+                }
+
+                #[cfg(not(any(target_os = "windows", unix)))]
+                {
                     let _ = proc.child.kill().await;
                 }
+
+                let _ = std::fs::remove_file(&proc.config_path);
+
+                // Clean up any residual adapter
+                #[cfg(target_os = "windows")]
+                {
+                    self.tun_manager.cleanup_stale_adapter("rustybox-tun");
+                }
+
+                self.log_manager
+                    .add_log("info", "sing-box core process stopped");
+                Ok(())
+            } else {
+                Err(CoreError::NotRunning)
             }
-
-            #[cfg(not(any(target_os = "windows", unix)))]
-            {
-                let _ = proc.child.kill().await;
-            }
-
-            let _ = std::fs::remove_file(&proc.config_path);
-
-            // Clean up any residual adapter
-            #[cfg(target_os = "windows")]
-            {
-                self.tun_manager.cleanup_stale_adapter("rustybox-tun");
-            }
-
-            self.log_manager
-                .add_log("info", "sing-box core process stopped");
-            Ok(())
-        } else {
-            Err(CoreError::NotRunning)
         }
     }
 }

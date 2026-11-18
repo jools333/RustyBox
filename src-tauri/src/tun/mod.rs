@@ -179,7 +179,8 @@ impl TunManager {
             is_supported: cfg!(any(
                 target_os = "windows",
                 target_os = "linux",
-                target_os = "macos"
+                target_os = "macos",
+                target_os = "android"
             )),
             has_driver,
             is_elevated,

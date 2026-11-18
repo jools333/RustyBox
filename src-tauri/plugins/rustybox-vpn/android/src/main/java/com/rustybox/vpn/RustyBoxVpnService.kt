@@ -127,6 +127,8 @@ class RustyBoxVpnService : VpnService() {
             lastError = e.message ?: e.toString()
             isRunning = false
             stopBox()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
     }
 

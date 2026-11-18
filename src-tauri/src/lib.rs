@@ -73,12 +73,15 @@ pub fn run() {
             // On Android, dirs::config_dir() returns None, so rebind ConfigManager
             // to Tauri's app_config_dir() which points to writable app internal storage.
             #[cfg(target_os = "android")]
-            if let Ok(config_dir) = app.path().app_config_dir() {
-                let _ = std::fs::create_dir_all(&config_dir);
-                app_state.config.set_path(config_dir.join("config.json"));
-                let cfg = app_state.config.get_config();
-                app_state.profiles.set_profiles(cfg.profiles.clone());
-                app_state.routing.set_rules(cfg.rules.clone());
+            {
+                app_state.core.set_app_handle(app.handle().clone());
+                if let Ok(config_dir) = app.path().app_config_dir() {
+                    let _ = std::fs::create_dir_all(&config_dir);
+                    app_state.config.set_path(config_dir.join("config.json"));
+                    let cfg = app_state.config.get_config();
+                    app_state.profiles.set_profiles(cfg.profiles.clone());
+                    app_state.routing.set_rules(cfg.rules.clone());
+                }
             }
 
             // Clean up any stale Wintun/TUN adapter left behind by a previous crash or sudden reboot
