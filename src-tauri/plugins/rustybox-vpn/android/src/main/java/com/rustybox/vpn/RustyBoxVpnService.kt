@@ -7,10 +7,26 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import io.nekohasekai.libbox.BoxService
+import io.nekohasekai.libbox.BridgeOptions
+import io.nekohasekai.libbox.BridgeSession
+import io.nekohasekai.libbox.CommandServer
+import io.nekohasekai.libbox.CommandServerHandler
+import io.nekohasekai.libbox.ConnectionOwner
+import io.nekohasekai.libbox.InterfaceUpdateListener
 import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.LocalDNSTransport
+import io.nekohasekai.libbox.NeighborUpdateListener
+import io.nekohasekai.libbox.NetworkInterfaceIterator
+import io.nekohasekai.libbox.Notification
+import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.PlatformInterface
+import io.nekohasekai.libbox.PlatformUser
+import io.nekohasekai.libbox.SetupOptions
+import io.nekohasekai.libbox.ShellSession
+import io.nekohasekai.libbox.StringIterator
+import io.nekohasekai.libbox.SystemProxyStatus
 import io.nekohasekai.libbox.TunOptions
+import io.nekohasekai.libbox.WIFIState
 
 class RustyBoxVpnService : VpnService() {
     companion object {
@@ -29,7 +45,7 @@ class RustyBoxVpnService : VpnService() {
             private set
     }
 
-    private var boxService: BoxService? = null
+    private var commandServer: CommandServer? = null
     private var tunFd: ParcelFileDescriptor? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -76,7 +92,17 @@ class RustyBoxVpnService : VpnService() {
         stopBox()
         lastError = null
         try {
+            val setupOptions = SetupOptions().apply {
+                basePath = filesDir.absolutePath
+                workingPath = filesDir.absolutePath
+                tempPath = cacheDir.absolutePath
+                fixAndroidStack = true
+            }
+            Libbox.setup(setupOptions)
+
             val platform = object : PlatformInterface {
+                override fun localDNSTransport(): LocalDNSTransport? = null
+
                 override fun openTun(options: TunOptions): Int {
                     val builder = Builder()
                         .setSession("RustyBox")
@@ -104,24 +130,58 @@ class RustyBoxVpnService : VpnService() {
                     sourcePort: Int,
                     destinationAddress: String?,
                     destinationPort: Int
-                ): Int = -1
+                ): ConnectionOwner? = null
 
-                override fun packageNameByUid(uid: Int): String = ""
-                override fun uidByPackageName(packageName: String?): Int = -1
                 override fun underNetworkExtension(): Boolean = false
                 override fun includeAllNetworks(): Boolean = false
                 override fun clearDNSCache() {}
-                override fun readWIFIState(): io.nekohasekai.libbox.WIFIState? = null
-                override fun startDefaultInterfaceMonitor(listener: io.nekohasekai.libbox.InterfaceUpdateListener?) {}
-                override fun closeDefaultInterfaceMonitor(listener: io.nekohasekai.libbox.InterfaceUpdateListener?) {}
-                override fun getInterfaces(): io.nekohasekai.libbox.NetworkInterfaceIterator? = null
-                override fun sendNotification(notification: io.nekohasekai.libbox.Notification?) {}
-                override fun writeLog(message: String?) {}
+                override fun readWIFIState(): WIFIState? = null
+                override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
+                override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
+                override fun getInterfaces(): NetworkInterfaceIterator? = null
+                override fun sendNotification(notification: Notification?) {}
+                override fun cancelNotification(identifier: String?, typeID: Int) {}
+                override fun startNeighborMonitor(listener: NeighborUpdateListener?) {}
+                override fun closeNeighborMonitor(listener: NeighborUpdateListener?) {}
+                override fun registerMyInterface(name: String?) {}
+                override fun usePlatformShell(): Boolean = false
+                override fun checkPlatformShell() {}
+                override fun openShellSession(
+                    user: PlatformUser?,
+                    command: String?,
+                    environ: StringIterator?,
+                    term: String?,
+                    rows: Int,
+                    cols: Int
+                ): ShellSession? = null
+
+                override fun lookupUser(username: String?): PlatformUser? = null
+                override fun lookupSFTPServer(): String = ""
+                override fun readSystemSSHHostKey(): String = ""
+                override fun tailscaleHostname(): String = ""
+                override fun usePlatformBridge(): Boolean = false
+                override fun createBridge(options: BridgeOptions?): BridgeSession? = null
             }
 
-            val service = Libbox.newService(configJson, platform)
-            service.start()
-            boxService = service
+            val handler = object : CommandServerHandler {
+                override fun serviceStop() {
+                    stopBox()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
+
+                override fun serviceReload() {}
+                override fun getSystemProxyStatus(): SystemProxyStatus? = null
+                override fun setSystemProxyEnabled(enabled: Boolean) {}
+                override fun triggerNativeCrash() {}
+                override fun writeDebugMessage(message: String?) {}
+                override fun connectSSHAgent(): Int = -1
+            }
+
+            val server = Libbox.newCommandServer(handler, platform)
+            server.start()
+            server.startOrReloadService(configJson, OverrideOptions())
+            commandServer = server
             isRunning = true
         } catch (e: Exception) {
             lastError = e.message ?: e.toString()
@@ -134,10 +194,14 @@ class RustyBoxVpnService : VpnService() {
 
     private fun stopBox() {
         try {
-            boxService?.close()
+            commandServer?.closeService()
         } catch (_: Exception) {
         }
-        boxService = null
+        try {
+            commandServer?.close()
+        } catch (_: Exception) {
+        }
+        commandServer = null
         try {
             tunFd?.close()
         } catch (_: Exception) {
